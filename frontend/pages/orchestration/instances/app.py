@@ -215,10 +215,13 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                     "short_leg_pnl": short_leg_pnl,
                     "open_basis": open_basis,
                     "curr_basis": curr_basis,
+                    "payback_hours": float(p.get("payback_hours", 0.0)),
                 })
 
                 # Compact Table Row: compact columns without excessive text bloat
                 lev_tag = f"多{long_lev}x/空{short_lev}x" if long_lev != short_lev else f"多空{long_lev}x"
+                pb_h = float(p.get("payback_hours", 0.0))
+                pb_str = f"{pb_h:.1f}h" if pb_h > 0 else "即时回本"
                 pos_table_rows.append({
                     "标的 (杠杆)": f"{token_sym} ({lev_tag})",
                     "对冲路径": f"🟢{c1_abbr}(多) ⇄ 🔴{c2_abbr}(空)",
@@ -227,6 +230,7 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                     "双边总货值": f"${pos_size * 2:,.2f}",
                     "持币数量": coin_amt_str,
                     "强平安全垫": health_badge,
+                    "预期回本": pb_str,
                     "盘口浮亏": f"${unrealized_pnl:+.4f}",
                     "累计资金费": f"${funding_inc:+.4f} ({settle_cnt}次)",
                     "综合净收益": f"${net_pnl:+.4f} ({net_pct:+.2%})",
@@ -292,7 +296,10 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
 
                         with col_c:
                             st.markdown("##### 📈 实时损益与费率利息")
+                            pb_val = item.get("payback_hours", 0.0)
+                            pb_display = f"`{pb_val:.1f}h` *(模式一阈值: ≤12h)*" if pb_val > 0 else "`0.0h (无倒贴)`"
                             st.markdown(f"""
+                            - **预期点差回本周期**: {pb_display}
                             - **盘口价差净损益 (对冲摩擦)**: `${item['unrealized_pnl']:+.4f}`
                             - **累计已收资金费**: **`${item['funding_inc']:+.4f}`** *(已结 `{item['settle_cnt']}` 次)*
                               - *(Hyperliquid 每1h结，币安每4h/8h结；周期交错期间暂显账期差)*
