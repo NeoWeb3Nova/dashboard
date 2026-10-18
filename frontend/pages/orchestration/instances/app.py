@@ -218,10 +218,26 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                     "payback_hours": float(p.get("payback_hours", 0.0)),
                 })
 
+                # Dynamic Breakeven calculation: how long to cover entry friction & net deficit
+                token_rate_daily = rate_diff_map.get(token_sym, 0.0) / 100.0
+                hourly_funding_usd = pos_size * (token_rate_daily / 24.0)
+                remaining_deficit = -net_pnl  # net deficit to recover
+                if remaining_deficit <= 0:
+                    dynamic_payback_str = f"✅ 已覆盖买入损耗 (当前纯盈利 ${net_pnl:+.4f})"
+                    table_payback_str = "✅ 已回本"
+                elif hourly_funding_usd > 0:
+                    est_hours_left = remaining_deficit / hourly_funding_usd
+                    dynamic_payback_str = f"⏳ 预计约 {est_hours_left:.1f} 小时覆盖损耗 (按每小时预收息 +${hourly_funding_usd:.4f} 计算)"
+                    table_payback_str = f"还需 ~{est_hours_left:.1f}h"
+                else:
+                    dynamic_payback_str = "⚠️ 当前息差为负，暂无法通过收息覆盖损耗"
+                    table_payback_str = "息差为负"
+
+                pos_card_items[-1]["dynamic_payback_str"] = dynamic_payback_str
+                pos_card_items[-1]["hourly_funding_usd"] = hourly_funding_usd
+
                 # Compact Table Row: compact columns without excessive text bloat
                 lev_tag = f"多{long_lev}x/空{short_lev}x" if long_lev != short_lev else f"多空{long_lev}x"
-                pb_h = float(p.get("payback_hours", 0.0))
-                pb_str = f"{pb_h:.1f}h" if pb_h > 0 else "即时回本"
                 pos_table_rows.append({
                     "标的 (杠杆)": f"{token_sym} ({lev_tag})",
                     "对冲路径": f"🟢{c1_abbr}(多) ⇄ 🔴{c2_abbr}(空)",
@@ -230,7 +246,7 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                     "双边总货值": f"${pos_size * 2:,.2f}",
                     "持币数量": coin_amt_str,
                     "强平安全垫": health_badge,
-                    "预期回本": pb_str,
+                    "预期回本": table_payback_str,
                     "盘口浮亏": f"${unrealized_pnl:+.4f}",
                     "累计资金费": f"${funding_inc:+.4f} ({settle_cnt}次)",
                     "综合净收益": f"${net_pnl:+.4f} ({net_pct:+.2%})",
@@ -297,14 +313,15 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                         with col_c:
                             st.markdown("##### 📈 实时损益与费率利息")
                             pb_val = item.get("payback_hours", 0.0)
-                            pb_display = f"`{pb_val:.1f}h` *(模式一阈值: ≤12h)*" if pb_val > 0 else "`0.0h (无倒贴)`"
+                            pb_init_str = f"{pb_val:.1f}h" if pb_val > 0 else "0.0h (无倒贴)"
                             st.markdown(f"""
-                            - **预期点差回本周期**: {pb_display}
-                            - **盘口价差净损益 (对冲摩擦)**: `${item['unrealized_pnl']:+.4f}`
-                            - **累计已收资金费**: **`${item['funding_inc']:+.4f}`** *(已结 `{item['settle_cnt']}` 次)*
+                            - ⏳ **覆盖开仓损耗预估时间**: **{item.get('dynamic_payback_str', '计算中...')}**
+                            - 🏷️ **开仓初始评测回本**: `{pb_init_str}` *(风控硬性门槛: ≤12h)*
+                            - 📉 **盘口价差净损益 (当前平仓对冲摩擦)**: `${item['unrealized_pnl']:+.4f}`
+                            - 💰 **累计已收净资金费**: **`${item['funding_inc']:+.4f}`** *(已结 `{item['settle_cnt']}` 次)*
                               - *(Hyperliquid 每1h结，币安每4h/8h结；周期交错期间暂显账期差)*
-                            - **综合净利润**: **`${item['net_pnl']:+.4f}`**
-                            - **下期资金费结算**: 约 `{min(item['next_f1'], item['next_f2'])}m` 后到账
+                            - 🛡️ **综合净利润**: **`${item['net_pnl']:+.4f}`**
+                            - ⏰ **下期资金费结算**: 约 `{min(item['next_f1'], item['next_f2'])}m` 后到账
                             """)
             else:
                 st.dataframe(pd.DataFrame(pos_table_rows), use_container_width=True, hide_index=True)
@@ -348,6 +365,18 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                   * **场景 C（如 2Z）**：两边都在收钱（币安做空收钱 +$0.15，Hyper 做多收钱 +$0.25），无任何扣款方，累计资金费直接为正（+$0.41）！  
                   
                   **总结**：策略核算的是**完整周期（8小时）内的综合净收益必定为正**。只要度过收付错位的暂时时间差，资金费总额必然是实打实的净流入！
+                * **7. 核心问答：多长时间能够回本？预期值怎么计算？是把盘口的价差作为损益吗？**  
+                  **是的！正是把【多空双腿实时平仓的价差净损益（买入时产生并随行情变动的点差手续费总摩擦）】作为待对冲的损益！**  
+                  * **计算公式**：
+                    $$\\text{预计剩余回本时间 (小时)} = \\frac{\\text{当前待覆盖净缺口 (盘口浮亏 - 累计已收资金费)}}{\\text{每小时预收息差现金流}}$$
+                    其中：
+                    $$\\text{每小时预收息差现金流} = \\text{仓位货值} \\times \\left(\\frac{\\text{日息差}}{24}\\right)$$
+                  * **直观实例**：
+                    假设仓位为 $10,000，开仓买卖点差手续费产生了 -$12.00 的盘口损耗，当前已收到资金费 $0.00，两所日息差为 0.24%（折合每小时收息 +$1.00）：
+                    $$\\text{预计回本时间} = \\frac{\\$12.00}{\\$1.00 / \\text{小时}} = \\mathbf{12.0 \\text{ 小时}}$$
+                  * **动态倒计时演进**：
+                    随着持仓时间增加，每隔 1h/8h 交易所就会发放一笔真金白银的资金费（如 +$1.00 到账），待覆盖缺口从 $12 缩小到 $11...$10...$0。  
+                    一旦资金费累计额超过点差亏损，**综合净利润即转为正数，回本状态自动转为「✅ 已完全回本并进入净盈利」**！
                 """)
         else:
             thresh_pct = arb_data.get("min_funding_rate_profitability_pct", 0.1)
