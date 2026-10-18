@@ -3,6 +3,8 @@ import os
 import time
 
 import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
 from frontend.st_utils import get_backend_api_client, initialize_st_page
@@ -21,19 +23,43 @@ REFRESH_INTERVAL = 10  # seconds
 
 
 def render_funding_arbitrage_tables(arb_data, bot_name):
-    """Render visual tables for Funding Rate Arbitrage positions, closed trades, and rate comparisons."""
+    """Render visual tables and rich Plotly charts for Funding Rate Arbitrage positions, closed trades, and liquidity depth."""
     active_pos = arb_data.get("active_positions", [])
     closed_trades = arb_data.get("closed_trades", [])
     market_comp = arb_data.get("market_comparison", [])
     is_dry_run = arb_data.get("is_dry_run", True)
 
     mode_badge = "🟢 纸面预演 (Dry-Run)" if is_dry_run else "🔴 实盘交易 (Live)"
-    st.markdown(f"#### 💰 资金费率套利持仓与成交详情 `{mode_badge}`")
+    st.markdown(f"#### 💰 资金费率套利持仓与量化透视 `{mode_badge}`")
 
-    tab_pos, tab_closed, tab_rates = st.tabs([
+    # --- Section A: Summary Key Performance Metrics ---
+    total_capital = sum(float(p.get("position_size", 0)) for p in active_pos)
+    total_funding_income = sum(float(p.get("funding_income", 0)) for p in active_pos) + sum(float(t.get("funding_pnl", 0)) for t in closed_trades)
+    total_unrealized_pnl = sum(float(p.get("unrealized_trading_pnl", 0)) for p in active_pos)
+    total_realized_pnl = sum(float(t.get("total_net_pnl", 0)) for t in closed_trades)
+    net_combined_pnl = total_funding_income + total_unrealized_pnl + total_realized_pnl
+
+    # Projected 24h funding cashflow
+    rate_diff_map = {m.get("token"): float(m.get("daily_rate_diff_pct", 0.0)) for m in market_comp}
+    projected_daily_usd = sum(float(p.get("position_size", 0)) * (rate_diff_map.get(p.get("token"), 0.0) / 100.0) for p in active_pos)
+    projected_apr = (projected_daily_usd * 365.0 / total_capital * 100.0) if total_capital > 0 else 0.0
+
+    col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+    with col_m1:
+        st.metric("🎯 名义对冲总仓位", f"${total_capital:,.2f}", f"{len(active_pos)} 个双边对冲组合")
+    with col_m2:
+        st.metric("💰 累计已收资金费", f"${total_funding_income:+.4f}", "每小时 / 8小时定时到账")
+    with col_m3:
+        st.metric("⚡ 24h 预期资金费现金流", f"+${projected_daily_usd:,.2f} / 天", f"折算年化 APR {projected_apr:+.2f}%")
+    with col_m4:
+        st.metric("🛡️ 综合净盈亏 (Net PnL)", f"${net_combined_pnl:+.4f}", "已扣除进出场手续费与价差")
+
+    # --- Section B: 4 Multi-Dimensional Tabs ---
+    tab_pos, tab_closed, tab_rates, tab_charts = st.tabs([
         f"📈 活跃多空持仓 ({len(active_pos)})",
         f"📜 历史平仓成交 ({len(closed_trades)})",
-        f"🌐 实时费率与利差监控 ({len(market_comp)})"
+        f"🌐 实时费率与利差监控 ({len(market_comp)})",
+        f"📊 盘口深度透视与多维图表看板"
     ])
 
     with tab_pos:
@@ -144,18 +170,166 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                             radar_rows.append({
                                 "全网排名": f"#{i}",
                                 "标的币种": o["coin"],
-                                "折算日化利差": f"{o['daily_diff_pct']:+.4f}% / 天",
                                 "折算年化 (APR)": f"{o['apr']:+.2f}%",
+                                "折算日化利差": f"{o['daily_diff_pct']:+.4f}% / 天",
+                                "流动性评级": o.get("liquidity_badge", "🟡 适中"),
+                                "建议单笔上限": o.get("safe_cap", "$2,000 ~ $5,000"),
+                                "HL 24h成交量": f"${o.get('hl_vol_24h', 0):,.0f}",
+                                "BN 24h成交量": f"${o.get('bn_vol_24h', 0):,.0f}",
                                 "推荐套利组合方向": o["best_path"],
                                 "现价 ($)": f"${o['price']:.4f}" if o['price'] < 10 else f"${o['price']:.2f}",
-                                "Hyperliquid 费率(日)": f"{o['connector_1_rate_daily']:+.4f}%",
-                                "Binance 费率(日)": f"{o['connector_2_rate_daily']:+.4f}%",
                             })
                         st.dataframe(pd.DataFrame(radar_rows), use_container_width=True, hide_index=True)
                 except Exception as e:
                     st.info(f"全市场雷达加载中: {e}")
         else:
             st.info("ℹ️ 正在连接交易所拉取实时费率对比数据...")
+
+    with tab_charts:
+        st.markdown("##### 🔬 盘口深度测算原理与量化分析看板")
+
+        with st.expander("📖 知识速递：盘口深度是怎么算出来的？为什么大单会遇到深度枯竭？", expanded=True):
+            st.markdown("""
+            **1. 盘口深度（Order Book Depth）的底层计算原理**：
+            * 订单簿由买单列表（Bids）和卖单列表（Asks）构成，每一档包含 `(价格 Pi, 挂单量 Qi)`。
+            * **累计深度金额 (USD)** = $\\sum_{i=1}^{n} (P_i \\times Q_i)$。
+            * 当机器人市价开仓（如名义价值 **$10,000**）时，系统从盘口第 1 档（最优价）开始吃单，逐层向下消耗流动性，直到累计吃满 $10,000。
+            * **为什么之前 $10,000 会报错？**  
+              在主流币（BTC/ETH）上，前 10 档深度可达数百万美元；但在某些热门山寨币上，Hyperliquid 的总挂单深度在某一瞬间可能只有 **$3,000 ~ $6,000**。如果下单金额设定为 $10,000，就会直接把整个挂单簿“吃空”，导致系统取不到可成交价格（返回 `NaN`）。
+            * **量化实战建议**：单笔开仓金额应控制在对应币种 24h 成交量的 **0.1% ~ 0.5%** 以内，既能稳收资金费，又能把滑点摩擦降至极低。
+            """)
+
+        # Fetch liquidity details for active / watched coins
+        try:
+            from frontend.components.funding_scanner import scan_cross_exchange_opportunities
+            opps = scan_cross_exchange_opportunities()
+            opp_dict = {o["coin"]: o for o in opps}
+        except Exception:
+            opp_dict = {}
+
+        watched_tokens = [p.get("token") for p in active_pos] if active_pos else [m.get("token") for m in market_comp]
+        if watched_tokens:
+            chart_tokens = []
+            hl_rates = []
+            bn_rates = []
+            spreads = []
+            aprs = []
+            hl_vols = []
+            bn_vols = []
+            cashflows = []
+
+            for t in watched_tokens:
+                m_info = next((m for m in market_comp if m.get("token") == t), {})
+                o_info = opp_dict.get(t, {})
+                diff = float(m_info.get("daily_rate_diff_pct", o_info.get("daily_diff_pct", 0.0)))
+                hl_r = float(m_info.get("hyperliquid_perpetual_rate_daily", o_info.get("connector_1_rate_daily", 0.0)))
+                bn_r = float(m_info.get("binance_perpetual_rate_daily", o_info.get("connector_2_rate_daily", 0.0)))
+                hl_v = float(o_info.get("hl_vol_24h", 100000))
+                bn_v = float(o_info.get("bn_vol_24h", 1000000))
+
+                pos_match = next((p for p in active_pos if p.get("token") == t), None)
+                p_size = float(pos_match.get("position_size", 10000)) if pos_match else 10000.0
+                daily_cash = p_size * (diff / 100.0)
+
+                chart_tokens.append(t)
+                hl_rates.append(hl_r)
+                bn_rates.append(bn_r)
+                spreads.append(diff)
+                aprs.append(diff * 365.0)
+                hl_vols.append(hl_v)
+                bn_vols.append(bn_v)
+                cashflows.append(daily_cash)
+
+            col_c1, col_c2 = st.columns(2)
+            with col_c1:
+                # Chart 1: Funding Rates & APR Spread
+                fig1 = go.Figure()
+                fig1.add_trace(go.Bar(
+                    x=chart_tokens, y=hl_rates,
+                    name='Hyperliquid 费率(日化)',
+                    marker_color='#3b82f6'
+                ))
+                fig1.add_trace(go.Bar(
+                    x=chart_tokens, y=bn_rates,
+                    name='Binance 费率(日化)',
+                    marker_color='#f59e0b'
+                ))
+                fig1.add_trace(go.Scatter(
+                    x=chart_tokens, y=spreads,
+                    name='日化净利差 (Daily Diff)',
+                    mode='lines+markers+text',
+                    text=[f"{a:.1f}% APR" for a in aprs],
+                    textposition='top center',
+                    line=dict(color='#10b981', width=3),
+                    marker=dict(size=8)
+                ))
+                fig1.update_layout(
+                    title="📈 标的费率与净利差 (APR) 对比",
+                    yaxis_title="日化费率 % / 天",
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                    height=380,
+                    margin=dict(l=20, r=20, t=50, b=20)
+                )
+                st.plotly_chart(fig1, use_container_width=True)
+
+            with col_c2:
+                # Chart 2: 24h Volume Liquidity Comparison (Log Scale)
+                fig2 = go.Figure()
+                fig2.add_trace(go.Bar(
+                    x=chart_tokens, y=hl_vols,
+                    name='Hyperliquid 24h成交量 ($)',
+                    marker_color='#6366f1'
+                ))
+                fig2.add_trace(go.Bar(
+                    x=chart_tokens, y=bn_vols,
+                    name='Binance 24h成交量 ($)',
+                    marker_color='#06b6d4'
+                ))
+                fig2.update_layout(
+                    title="🌊 两所 24h 交易流动性量级对比 (对数刻度)",
+                    yaxis_type="log",
+                    yaxis_title="24h 成交额 (USD, Log Scale)",
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                    height=380,
+                    margin=dict(l=20, r=20, t=50, b=20)
+                )
+                st.plotly_chart(fig2, use_container_width=True)
+
+            # Chart 3: Projected Daily Cashflow per token
+            st.markdown("##### 💵 各标的 24 小时预期资金费现金流收益 ($/天)")
+            fig3 = go.Figure()
+            fig3.add_trace(go.Bar(
+                x=chart_tokens, y=cashflows,
+                text=[f"+${c:.2f}/天" for c in cashflows],
+                textposition='auto',
+                marker_color='#10b981',
+                name='单币种 24h 预期入账'
+            ))
+            fig3.update_layout(
+                yaxis_title="预期日入账 ($ USD)",
+                height=280,
+                margin=dict(l=20, r=20, t=30, b=20)
+            )
+            st.plotly_chart(fig3, use_container_width=True)
+
+            # Liquidity Summary Table
+            st.markdown("##### 🛡️ 标的盘口深度评级与安全持仓容量表")
+            liq_table = []
+            for t in chart_tokens:
+                o_item = opp_dict.get(t, {})
+                liq_table.append({
+                    "标的币种": t,
+                    "流动性评级": o_item.get("liquidity_badge", "🟡 适中"),
+                    "建议安全单笔上限": o_item.get("safe_cap", "$2,000 ~ $5,000"),
+                    "Hyperliquid 24h成交额": f"${o_item.get('hl_vol_24h', 0):,.0f}",
+                    "Binance 24h成交额": f"${o_item.get('bn_vol_24h', 0):,.0f}",
+                    "折算年化 (APR)": f"{o_item.get('apr', 0):+.2f}%",
+                    "推荐对冲方向": o_item.get("best_path", "N/A"),
+                })
+            st.dataframe(pd.DataFrame(liq_table), use_container_width=True, hide_index=True)
+        else:
+            st.info("ℹ️ 暂无足够标的数据生成可视化图表。")
+
 
 
 def get_bot_funding_arbitrage_data(bot_name, performance):
