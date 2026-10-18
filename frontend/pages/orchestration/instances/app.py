@@ -883,19 +883,52 @@ def render_bot_card(bot_name):
                             if total_volume_traded < min_expected_vol:
                                 total_volume_traded = min_expected_vol
 
-                    total_global_pnl_pct = total_global_pnl_quote / total_volume_traded if total_volume_traded > 0 else 0
+                    # Calculate ROI/ROE based on Real Invested Capital (Margin) vs Volume Turnover
+                    if is_funding_arb_bot and arb_data:
+                        global_lev = int(arb_data.get("leverage", 3))
+                        real_margin_total = sum(
+                            float(p.get("position_size", 0)) * (
+                                1.0 / float(p.get("long_leverage", global_lev)) +
+                                1.0 / float(p.get("short_leverage", global_lev))
+                            ) for p in active_pos
+                        )
+                        # Fallback for margin when no active positions
+                        if real_margin_total <= 0 and closed_trades:
+                            real_margin_total = 10000.0 * 2.0 / global_lev
 
-                    # Display metrics
-                    col1, col2, col3, col4 = st.columns(4)
+                        roe_pct = (total_global_pnl_quote / real_margin_total) if real_margin_total > 0 else 0.0
+                        vol_pnl_pct = (total_global_pnl_quote / total_volume_traded) if total_volume_traded > 0 else 0.0
 
-                    with col1:
-                        st.metric("🏦 NET PNL", f"${total_global_pnl_quote:,.2f}")
-                    with col2:
-                        st.metric("💹 Unrealized PNL", f"${total_unrealized_pnl_quote:,.2f}")
-                    with col3:
-                        st.metric("📊 NET PNL (%)", f"{total_global_pnl_pct:+.2%}")
-                    with col4:
-                        st.metric("💸 Volume Traded", f"${total_volume_traded:,.2f}")
+                        # Display metrics
+                        col1, col2, col3, col4 = st.columns(4)
+
+                        with col1:
+                            st.metric("🏦 NET PNL", f"${total_global_pnl_quote:,.2f}", help="全周期累计综合净利润（已实现平仓损益 + 活跃持仓未实现价差 + 累计资金费收入）")
+                        with col2:
+                            st.metric("💹 Unrealized PNL", f"${total_unrealized_pnl_quote:,.2f}", help="当前正在持仓头寸的浮动盈亏（当前盘口平仓价差 + 该仓位已收利息）")
+                        with col3:
+                            st.metric(
+                                "📊 真实本金收益率 (ROE)",
+                                f"{roe_pct:+.2%}",
+                                f"实缴本金 ${real_margin_total:,.2f} (成交换算 {vol_pnl_pct:+.2%})",
+                                help=f"对标真实投入本金（双边实缴保证金总额 ${real_margin_total:,.2f}）计算的真实回报率。\n注：括号内为高频量化按总成交量换算比率（{vol_pnl_pct:+.2%}）。"
+                            )
+                        with col4:
+                            st.metric("💸 Volume Traded", f"${total_volume_traded:,.2f}", help="策略累计撮合的双边总货值（开仓双腿 + 平仓双腿）")
+                    else:
+                        total_global_pnl_pct = total_global_pnl_quote / total_volume_traded if total_volume_traded > 0 else 0
+
+                        # Display metrics
+                        col1, col2, col3, col4 = st.columns(4)
+
+                        with col1:
+                            st.metric("🏦 NET PNL", f"${total_global_pnl_quote:,.2f}")
+                        with col2:
+                            st.metric("💹 Unrealized PNL", f"${total_unrealized_pnl_quote:,.2f}")
+                        with col3:
+                            st.metric("📊 NET PNL (%)", f"{total_global_pnl_pct:+.2%}")
+                        with col4:
+                            st.metric("💸 Volume Traded", f"${total_volume_traded:,.2f}")
 
                     # Funding Rate Arbitrage Visual Section
                     if is_funding_arb_bot:
