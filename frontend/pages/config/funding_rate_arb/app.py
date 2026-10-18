@@ -309,6 +309,12 @@ with c_p3:
         help="开启后，只有当开仓时两边的现价没有产生严重负滑点时才开仓，进一步保护利润"
     )
 
+    dynamic_position_sizing = st.checkbox(
+        "🛡️ 盘口流动性自适应动态控仓 (推荐)",
+        value=True,
+        help="开启后，策略将实时根据币种在两所的盘口挂单深度动态计算安全仓位（最高不超过目标名义价值），防止小币种吃穿盘口造成滑点损失。"
+    )
+
 st.write("---")
 
 # ==================== 4. Live YAML Config Generation & Preview ====================
@@ -321,6 +327,8 @@ config_dict = {
     "tokens": final_tokens,
     "leverage": int(leverage),
     "position_size_quote": float(position_size_quote),
+    "dynamic_position_sizing": bool(dynamic_position_sizing),
+    "max_orderbook_depth_ratio": 0.3,
     "min_funding_rate_profitability": float(min_funding_rate_profitability),
     "profitability_to_take_profit": float(profitability_to_take_profit),
     "funding_rate_diff_stop_loss": float(funding_rate_diff_stop_loss),
