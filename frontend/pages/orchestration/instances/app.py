@@ -113,10 +113,26 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                 c2_abbr = short_ex.split('_')[0].capitalize()
                 countdown_str = f"{c1_abbr}: {next_f1}m | {c2_abbr}: {next_f2}m"
 
+                min_dist = p.get("min_liq_distance_pct", 0.30)
+                if min_dist >= 0.20:
+                    health_badge = f"🟢 充沛 (+{min_dist:.1%})"
+                elif min_dist >= 0.12:
+                    health_badge = f"🟡 良好 (+{min_dist:.1%})"
+                else:
+                    health_badge = f"🔴 警戒 (+{min_dist:.1%})"
+
+                liq_p1 = p.get("liq_price_1", 0)
+                liq_p2 = p.get("liq_price_2", 0)
+                liq_long = liq_p1 if side == "BUY" else liq_p2
+                liq_short = liq_p2 if side == "BUY" else liq_p1
+                long_liq_str = f" | 强平: ${liq_long:.4f}" if liq_long > 0 else ""
+                short_liq_str = f" | 强平: ${liq_short:.4f}" if liq_short > 0 else ""
+
                 pos_rows.append({
                     "标的币种": p.get("token"),
-                    "多头腿 (Long)": f"{long_ex} (买: ${long_p:.4f} | 现: ${curr_long_p:.4f})",
-                    "空头腿 (Short)": f"{short_ex} (卖: ${short_p:.4f} | 现: ${curr_short_p:.4f})",
+                    "多头腿 (Long)": f"{long_ex} (买: ${long_p:.4f} | 现: ${curr_long_p:.4f}{long_liq_str})",
+                    "空头腿 (Short)": f"{short_ex} (卖: ${short_p:.4f} | 现: ${curr_short_p:.4f}{short_liq_str})",
+                    "🛡️ 强平安全距离": health_badge,
                     "名义头寸": f"${p.get('position_size', 0):.2f}",
                     "累计已收资金费": f"${p.get('funding_income', 0):+.4f} ({p.get('settlement_count', 0)}次)",
                     "盘口浮盈亏": f"${p.get('unrealized_trading_pnl', 0):+.4f}",
