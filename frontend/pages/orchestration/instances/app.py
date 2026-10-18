@@ -1,3 +1,5 @@
+import json
+import os
 import time
 
 import pandas as pd
@@ -16,6 +18,101 @@ if "auto_refresh_enabled" not in st.session_state:
 
 # Set refresh interval
 REFRESH_INTERVAL = 10  # seconds
+
+
+def render_funding_arbitrage_tables(arb_data, bot_name):
+    """Render visual tables for Funding Rate Arbitrage positions, closed trades, and rate comparisons."""
+    active_pos = arb_data.get("active_positions", [])
+    closed_trades = arb_data.get("closed_trades", [])
+    market_comp = arb_data.get("market_comparison", [])
+    is_dry_run = arb_data.get("is_dry_run", True)
+
+    mode_badge = "🟢 纸面预演 (Dry-Run)" if is_dry_run else "🔴 实盘交易 (Live)"
+    st.markdown(f"#### 💰 资金费率套利持仓与成交详情 `{mode_badge}`")
+
+    tab_pos, tab_closed, tab_rates = st.tabs([
+        f"📈 活跃多空持仓 ({len(active_pos)})",
+        f"📜 历史平仓成交 ({len(closed_trades)})",
+        f"🌐 实时费率与利差监控 ({len(market_comp)})"
+    ])
+
+    with tab_pos:
+        if active_pos:
+            st.caption("ℹ️ 当前正在双边对冲并按期收取资金费的套利头寸（随交易所盘口每 10 秒自动刷新）")
+            pos_rows = []
+            for p in active_pos:
+                duration_min = p.get("duration_seconds", 0) // 60
+                dur_str = f"{duration_min // 60}h {duration_min % 60}m"
+                side = p.get("side", "")
+                long_ex = p.get("connector_1", "") if side == "BUY" else p.get("connector_2", "")
+                short_ex = p.get("connector_2", "") if side == "BUY" else p.get("connector_1", "")
+                long_p = p.get("entry_price_1", 0) if side == "BUY" else p.get("entry_price_2", 0)
+                short_p = p.get("entry_price_2", 0) if side == "BUY" else p.get("entry_price_1", 0)
+                curr_p1 = p.get("current_price_1", 0)
+                curr_p2 = p.get("current_price_2", 0)
+                curr_long_p = curr_p1 if side == "BUY" else curr_p2
+                curr_short_p = curr_p2 if side == "BUY" else curr_p1
+
+                now_ts = time.time()
+                next_f1 = max(0, int(p.get("next_funding_1", 0) - now_ts)) // 60
+                next_f2 = max(0, int(p.get("next_funding_2", 0) - now_ts)) // 60
+                c1_abbr = long_ex.split('_')[0].capitalize()
+                c2_abbr = short_ex.split('_')[0].capitalize()
+                countdown_str = f"{c1_abbr}: {next_f1}m | {c2_abbr}: {next_f2}m"
+
+                pos_rows.append({
+                    "标的币种": p.get("token"),
+                    "多头腿 (Long)": f"{long_ex} (买: ${long_p:.4f} | 现: ${curr_long_p:.4f})",
+                    "空头腿 (Short)": f"{short_ex} (卖: ${short_p:.4f} | 现: ${curr_short_p:.4f})",
+                    "名义头寸": f"${p.get('position_size', 0):.2f}",
+                    "累计已收资金费": f"${p.get('funding_income', 0):+.4f} ({p.get('settlement_count', 0)}次)",
+                    "盘口浮盈亏": f"${p.get('unrealized_trading_pnl', 0):+.4f}",
+                    "综合净收益": f"${p.get('net_pnl', 0):+.4f} ({p.get('net_pnl_pct', 0):+.2%})",
+                    "持仓时长": dur_str,
+                    "下期结算倒计时": countdown_str,
+                })
+            st.dataframe(pd.DataFrame(pos_rows), use_container_width=True, hide_index=True)
+        else:
+            st.info("ℹ️ 当前暂无持仓中头寸。策略正在持续比对两所实时资金费率，一旦出现利差机会将在此处自动展示多空建仓与利息明细。")
+
+    with tab_closed:
+        if closed_trades:
+            st.caption("ℹ️ 达到止盈目标（Take Profit）或触发费率倒挂止损（Stop Loss）而平仓的历史记录")
+            closed_rows = []
+            for t in closed_trades:
+                close_dt = pd.to_datetime(t.get("close_timestamp", 0), unit="s").strftime("%Y-%m-%d %H:%M:%S") if t.get("close_timestamp") else "N/A"
+                closed_rows.append({
+                    "平仓时间": close_dt,
+                    "标的币种": t.get("token"),
+                    "套利交易所": f"{t.get('connector_1')} & {t.get('connector_2')}",
+                    "平仓原因": t.get("close_reason", "Completed"),
+                    "价差损益": f"${t.get('trading_pnl', 0):+.4f}",
+                    "资金费净利息": f"${t.get('funding_pnl', 0):+.4f}",
+                    "最终实现净利润 (Net PnL)": f"${t.get('total_net_pnl', 0):+.4f}",
+                })
+            st.dataframe(pd.DataFrame(closed_rows), use_container_width=True, hide_index=True)
+        else:
+            st.info("ℹ️ 暂无历史平仓记录。")
+
+    with tab_rates:
+        if market_comp:
+            st.caption("ℹ️ 策略后台实时扫描的各币种在不同交易所的资金费率及最佳套利利差")
+            rates_rows = []
+            for m in market_comp:
+                row = {
+                    "监控币种": m.get("token"),
+                    "推荐套利组合 (Path)": m.get("best_path", "N/A"),
+                    "折算日化利差 (Daily Diff)": f"{m.get('daily_rate_diff_pct', 0):+.4f}% / 天",
+                    "折算年化利差 (APR)": f"{m.get('daily_rate_diff_pct', 0) * 365:+.2f}%",
+                }
+                for k, v in m.items():
+                    if k.endswith("_rate_daily"):
+                        c_title = k.replace("_rate_daily", "")
+                        row[f"{c_title} 费率 (日化)"] = f"{v:+.4f}%"
+                rates_rows.append(row)
+            st.dataframe(pd.DataFrame(rates_rows), use_container_width=True, hide_index=True)
+        else:
+            st.info("ℹ️ 正在连接交易所拉取实时费率对比数据...")
 
 
 def stop_bot(bot_name):
@@ -289,6 +386,29 @@ def render_bot_card(bot_name):
                         st.error("💀 **Controllers with Errors:** Controllers that encountered errors")
                         error_df = pd.DataFrame(error_controllers)
                         st.dataframe(error_df, use_container_width=True, hide_index=True)
+
+                    # Funding Rate Arbitrage Visual Section
+                    arb_data = None
+                    for ctrl_id, ctrl_dict in performance.items():
+                        c_info = ctrl_dict.get("custom_info", {})
+                        if "active_positions" in c_info or "closed_trades" in c_info or "market_comparison" in c_info:
+                            arb_data = c_info
+                            break
+
+                    if not arb_data:
+                        local_json = os.path.abspath(os.path.join(
+                            os.path.dirname(__file__),
+                            f"../../../../../hummingbot-api/bots/instances/{bot_name}/data/arbitrage_trades.json"
+                        ))
+                        if os.path.exists(local_json):
+                            try:
+                                with open(local_json, "r") as jf:
+                                    arb_data = json.load(jf)
+                            except Exception:
+                                pass
+
+                    if arb_data:
+                        render_funding_arbitrage_tables(arb_data, bot_name)
 
                 # Logs sections (available for both running and stopped bots)
                 with st.expander("📋 Error Logs"):
