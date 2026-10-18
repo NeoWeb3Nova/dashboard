@@ -94,6 +94,33 @@ st.write("---")
 # ==================== 3. Core Strategy Configuration Form ====================
 st.subheader("⚙️ 资金费率套利参数配置")
 
+# Step 0: Execution Mode (Dry-Run vs Live)
+st.markdown("#### 0. 策略运行模式 (Execution Mode)")
+mode_col1, mode_col2 = st.columns([0.45, 0.55])
+with mode_col1:
+    trading_mode = st.radio(
+        "选择策略运行模式",
+        options=["纸面预演 (Dry Run - 推荐/零风险)", "实盘交易 (Live Trading - 真实下单)"],
+        index=0,
+        help="纸面预演：使用交易所 100% 真实实时的盘口深度与资金费率在本地沙盒进行模拟套利与收益结算，绝不向交易所发送真实订单，无需配置 API Key。\n实盘交易：真实向交易所下单开仓，需提前配置好 API Key 或钱包私钥。"
+    )
+is_dry_run = trading_mode.startswith("纸面预演")
+
+with mode_col2:
+    if is_dry_run:
+        st.success("""
+        🟢 **纸面预演（Dry Run）模式已激活**
+        * **实时真实行情**：通过公共 WebSocket/REST 实时监控 Binance 与 Hyperliquid 的深度与资金费率。
+        * **沙盒虚拟结算**：命中套利阈值时在本地沙盒虚拟开仓，按各交易所真实结算周期自动结算资金费。
+        * **免配密钥**：无需配置 API Key，绝无资金风险。
+        """)
+    else:
+        st.warning("""
+        ⚠️ **实盘交易（Live Trading）模式**
+        * 机器人将真实调用交易所下单接口。
+        * 启动前请确保已在 API / 系统凭证中配置对应交易所的 API 密钥与钱包私钥。
+        """)
+
 # Step 1: Connectors selection
 st.markdown("#### 1. 永续合约交易所选择 (Perpetual Connectors)")
 c_conn1, c_conn2 = st.columns(2)
@@ -227,6 +254,7 @@ st.subheader("📋 策略配置预览 (Live Configuration Preview)")
 
 config_dict = {
     "script_file_name": "v2_funding_rate_arb.py",
+    "dry_run": bool(is_dry_run),
     "connectors": [connector_1, connector_2],
     "tokens": final_tokens,
     "leverage": int(leverage),
@@ -245,7 +273,8 @@ with c_cfg1:
 
 with c_cfg2:
     st.markdown("#### ⚙️ 配置文件命名与保存")
-    default_cfg_name = f"funding_arb_{connector_1.split('_')[0]}_{connector_2.split('_')[0]}"
+    mode_suffix = "_dry_run" if is_dry_run else ""
+    default_cfg_name = f"funding_arb_{connector_1.split('_')[0]}_{connector_2.split('_')[0]}{mode_suffix}"
     user_config_name = st.text_input(
         "配置文件名 (Config Name)",
         value=default_cfg_name,
@@ -299,11 +328,15 @@ except Exception:
 
 active_saved_cfg = st.session_state.get("saved_funding_cfg", clean_config_name)
 
+if is_dry_run:
+    st.info("💡 **纸面预演（Dry Run）部署提示**：启动机器人无需在凭证中配置 API Key，系统将自动连接交易所公开接口进行实时监控与沙盒模拟，无任何资金损失风险。")
+
 dep_col1, dep_col2, dep_col3 = st.columns(3)
 with dep_col1:
+    default_bot_name = "funding-arb-dryrun" if is_dry_run else "funding-arb-bot"
     bot_name = st.text_input(
         "机器人实例名称 (Instance Name)",
-        value=f"funding-arb-bot",
+        value=default_bot_name,
         help="部署后的容器与任务名称"
     )
 with dep_col2:
