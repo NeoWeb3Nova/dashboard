@@ -783,17 +783,26 @@ def render_bot_card(bot_name):
                             archive_bot(bot_name)
 
                 if is_running:
+                    # Early fetch funding rate arbitrage data if applicable
+                    is_funding_arb_bot, arb_data = get_bot_funding_arbitrage_data(bot_name, performance)
+
                     # Calculate totals
                     active_controllers = []
                     stopped_controllers = []
                     error_controllers = []
-                    total_global_pnl_quote = 0
-                    total_volume_traded = 0
-                    total_unrealized_pnl_quote = 0
+                    total_global_pnl_quote = 0.0
+                    total_volume_traded = 0.0
+                    total_unrealized_pnl_quote = 0.0
 
                     for controller, inner_dict in performance.items():
                         if controller == "funding_rate_arb":
+                            # Accumulate funding rate arbitrage performance into top-level totals
+                            arb_perf = inner_dict.get("performance", {})
+                            total_global_pnl_quote += float(arb_perf.get("global_pnl_quote", 0.0))
+                            total_unrealized_pnl_quote += float(arb_perf.get("unrealized_pnl_quote", 0.0))
+                            total_volume_traded += float(arb_perf.get("volume_traded", 0.0))
                             continue
+
                         controller_status = inner_dict.get("status")
                         if controller_status == "error":
                             error_controllers.append({
@@ -850,22 +859,45 @@ def render_bot_card(bot_name):
                         total_volume_traded += volume_traded
                         total_unrealized_pnl_quote += unrealized_pnl_quote
 
+                    # Fallback / augment with arb_data if funding arb bot
+                    if is_funding_arb_bot and arb_data:
+                        active_pos = arb_data.get("active_positions", [])
+                        closed_trades = arb_data.get("closed_trades", [])
+
+                        # If MQTT didn't provide performance totals, compute directly from arb_data
+                        if total_volume_traded == 0 and (active_pos or closed_trades):
+                            active_unrealized = sum(float(p.get("unrealized_trading_pnl", 0)) for p in active_pos)
+                            active_funding = sum(float(p.get("funding_income", 0)) for p in active_pos)
+                            closed_pnl = sum(float(t.get("total_net_pnl", 0)) for t in closed_trades)
+
+                            total_unrealized_pnl_quote = active_unrealized + active_funding
+                            total_global_pnl_quote = closed_pnl + active_unrealized + active_funding
+
+                            active_vol = sum(float(p.get("position_size", 10000.0)) * 2.0 for p in active_pos)
+                            closed_vol = sum(float(t.get("position_size", 10000.0)) * 4.0 for t in closed_trades)
+                            total_volume_traded = active_vol + closed_vol
+                        else:
+                            # Ensure round-trip volume of closed trades is also counted if MQTT only counted active
+                            closed_vol = sum(float(t.get("position_size", 10000.0)) * 4.0 for t in closed_trades)
+                            min_expected_vol = sum(float(p.get("position_size", 10000.0)) * 2.0 for p in active_pos) + closed_vol
+                            if total_volume_traded < min_expected_vol:
+                                total_volume_traded = min_expected_vol
+
                     total_global_pnl_pct = total_global_pnl_quote / total_volume_traded if total_volume_traded > 0 else 0
 
                     # Display metrics
                     col1, col2, col3, col4 = st.columns(4)
 
                     with col1:
-                        st.metric("🏦 NET PNL", f"${total_global_pnl_quote:.2f}")
+                        st.metric("🏦 NET PNL", f"${total_global_pnl_quote:,.2f}")
                     with col2:
-                        st.metric("💹 Unrealized PNL", f"${total_unrealized_pnl_quote:.2f}")
+                        st.metric("💹 Unrealized PNL", f"${total_unrealized_pnl_quote:,.2f}")
                     with col3:
-                        st.metric("📊 NET PNL (%)", f"{total_global_pnl_pct:.2%}")
+                        st.metric("📊 NET PNL (%)", f"{total_global_pnl_pct:+.2%}")
                     with col4:
-                        st.metric("💸 Volume Traded", f"${total_volume_traded:.2f}")
+                        st.metric("💸 Volume Traded", f"${total_volume_traded:,.2f}")
 
                     # Funding Rate Arbitrage Visual Section
-                    is_funding_arb_bot, arb_data = get_bot_funding_arbitrage_data(bot_name, performance)
                     if is_funding_arb_bot:
                         render_funding_arbitrage_tables(arb_data, bot_name)
 
