@@ -132,6 +132,28 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                         row[f"{c_title} 费率 (日化)"] = v_str
                 rates_rows.append(row)
             st.dataframe(pd.DataFrame(rates_rows), use_container_width=True, hide_index=True)
+
+            with st.expander("📡 查看全市场 200+ 标的实时高利差机会雷达 (Market Radar)", expanded=False):
+                try:
+                    from frontend.components.funding_scanner import scan_cross_exchange_opportunities
+                    all_opps = scan_cross_exchange_opportunities()
+                    if all_opps:
+                        st.caption("ℹ️ 当前全市场正在爆发高利差的潜力标的排行榜（如果当前机器人监控币种利差较低，可参考此列表挑选并切换标的）：")
+                        radar_rows = []
+                        for i, o in enumerate(all_opps[:15], 1):
+                            radar_rows.append({
+                                "全网排名": f"#{i}",
+                                "标的币种": o["coin"],
+                                "折算日化利差": f"{o['daily_diff_pct']:+.4f}% / 天",
+                                "折算年化 (APR)": f"{o['apr']:+.2f}%",
+                                "推荐套利组合方向": o["best_path"],
+                                "现价 ($)": f"${o['price']:.4f}" if o['price'] < 10 else f"${o['price']:.2f}",
+                                "Hyperliquid 费率(日)": f"{o['connector_1_rate_daily']:+.4f}%",
+                                "Binance 费率(日)": f"{o['connector_2_rate_daily']:+.4f}%",
+                            })
+                        st.dataframe(pd.DataFrame(radar_rows), use_container_width=True, hide_index=True)
+                except Exception as e:
+                    st.info(f"全市场雷达加载中: {e}")
         else:
             st.info("ℹ️ 正在连接交易所拉取实时费率对比数据...")
 

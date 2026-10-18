@@ -1,8 +1,10 @@
 import os
 import re
 import yaml
+import pandas as pd
 import streamlit as st
 
+from frontend.components.funding_scanner import scan_cross_exchange_opportunities
 from frontend.st_utils import get_backend_api_client, initialize_st_page
 
 # Initialize the Streamlit page
@@ -156,18 +158,70 @@ with c_conn2:
 if connector_1 == connector_2:
     st.error("⚠️ 两个交易所不能相同！请选择不同的永续合约交易所。")
 
-# Step 2: Tokens to monitor
-st.markdown("#### 2. 监控套利标的币种 (Tokens to Monitor)")
-c_tok1, c_tok2 = st.columns([0.6, 0.4])
+# Step 2: Live Market Opportunities Scanner & Tokens Selection
+st.markdown("#### 2. 全市场实时利差雷达与监控标的 (Market Radar & Tokens Selection)")
+st.caption("🚀 **主动雷达巡检**：系统自动并发比对 Binance 与 Hyperliquid 全市场 200+ 个共有合约的最新资金费率，智能找出当前暴利机会，告别盲目死守死等！")
 
-popular_tokens = ["ETH", "BTC", "SOL", "WIF", "FET", "DOGE", "PEPE", "NEAR", "SUI", "AVAX"]
+# Scanner cache and fetch
+@st.cache_data(ttl=30, show_spinner=False)
+def get_cached_opportunities(c1, c2):
+    return scan_cross_exchange_opportunities(c1, c2)
+
+with st.spinner("🔍 正在扫描 Binance 与 Hyperliquid 全市场 200+ 标的实时资金费率..."):
+    live_opps = get_cached_opportunities(connector_1, connector_2)
+
+top_opp_tokens = [o["coin"] for o in live_opps[:5]] if live_opps else ["2Z", "MON", "SAND", "MOODENG", "YGG"]
+
+# Render Scanner expander / table
+with st.expander(f"📡 点击展开：全市场实时利差机会排行榜 (已发现 {len(live_opps)} 个共有标的)", expanded=True):
+    col_filter1, col_filter2, col_filter3 = st.columns([2, 1, 1])
+    with col_filter1:
+        if live_opps:
+            st.markdown(f"🔥 当前全市场最高套利机会：**{live_opps[0]['coin']}** (年化 APR **{live_opps[0]['apr']:.2f}%**, 日化 **{live_opps[0]['diff_daily_pct']:+.4f}%/天**)")
+        else:
+            st.markdown("ℹ️ 暂未获取到全市场费率，请点击刷新。")
+    with col_filter2:
+        if st.button("⚡ 一键采纳 TOP 5 标的", use_container_width=True, help="一键勾选当前全市场利差最高的前 5 个标的"):
+            st.session_state["selected_arb_tokens"] = top_opp_tokens
+            st.rerun()
+    with col_filter3:
+        if st.button("🔄 刷新全市场费率", use_container_width=True, help="强制重新连接交易所 API 拉取最新盘口费率"):
+            st.cache_data.clear()
+            st.rerun()
+
+    if live_opps:
+        # Display top 15 in nice visual dataframe
+        radar_df = pd.DataFrame([{
+            "排名": f"#{i}",
+            "标的代币": o["coin"],
+            "折算日化利差": f"{o['daily_diff_pct']:+.4f}% / 天",
+            "折算年化 (APR)": f"{o['apr']:+.2f}%",
+            "推荐套利组合方向": o["best_path"],
+            "现价 ($)": f"${o['price']:.4f}" if o['price'] < 10 else f"${o['price']:.2f}",
+            "Hyperliquid 日化": f"{o['connector_1_rate_daily']:+.4f}%",
+            "Binance 日化": f"{o['connector_2_rate_daily']:+.4f}%",
+        } for i, o in enumerate(live_opps[:15], 1)])
+        st.dataframe(radar_df, use_container_width=True, hide_index=True)
+
+# Selection controls
+if "selected_arb_tokens" not in st.session_state:
+    st.session_state["selected_arb_tokens"] = top_opp_tokens if top_opp_tokens else ["ETH", "SOL", "WIF", "FET"]
+
+all_available_options = [o["coin"] for o in live_opps] if live_opps else ["2Z", "MON", "SAND", "MOODENG", "YGG", "ETH", "BTC", "SOL", "WIF", "FET"]
+for t in ["ETH", "BTC", "SOL", "WIF", "FET"]:
+    if t not in all_available_options:
+        all_available_options.append(t)
+
+c_tok1, c_tok2 = st.columns([0.65, 0.35])
 with c_tok1:
     selected_tokens = st.multiselect(
-        "选择重点监控的高费率币种",
-        options=popular_tokens,
-        default=["ETH", "SOL", "WIF", "FET"],
-        help="策略会在后台实时扫描这些币种在两个交易所之间的费率差，只要出现利差自动执行开仓"
+        "选择您认可并希望机器人执行套利的标的代币",
+        options=all_available_options,
+        default=[t for t in st.session_state["selected_arb_tokens"] if t in all_available_options],
+        help="策略会在后台实时扫描这些所选币种。您可以结合上方雷达的年化利差与代币知名度/流动性自主挑选。"
     )
+    # Sync session state
+    st.session_state["selected_arb_tokens"] = selected_tokens
 with c_tok2:
     custom_tokens_input = st.text_input(
         "追加自定义币种 (以逗号分隔)",
