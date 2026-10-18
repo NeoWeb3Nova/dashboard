@@ -1,0 +1,5 @@
+#!/bin/bash
+cd "$(dirname "$0")"
+eval "$($HOME/miniforge3/bin/conda shell.bash hook)"
+conda activate dashboard
+streamlit run main.py --server.headless true --server.port 8501 --server.address 0.0.0.0

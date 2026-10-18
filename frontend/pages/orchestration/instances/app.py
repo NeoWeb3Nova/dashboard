@@ -292,24 +292,88 @@ def render_bot_card(bot_name):
 
                 # Logs sections (available for both running and stopped bots)
                 with st.expander("📋 Error Logs"):
-                    if error_logs:
-                        for log in error_logs[:50]:
+                    clear_error_key = f"cleared_error_ids_{bot_name}"
+                    cleared_error_ids = st.session_state.get(clear_error_key, set())
+
+                    col_ctrl1, col_ctrl2 = st.columns([3, 1])
+                    with col_ctrl2:
+                        if cleared_error_ids:
+                            if st.button("🔄 显示全部", key=f"restore_errors_{bot_name}", use_container_width=True):
+                                st.session_state[clear_error_key] = set()
+                                st.rerun()
+                        else:
+                            if error_logs and st.button("🧹 清空显示", key=f"clear_errors_{bot_name}", use_container_width=True, help="清空屏幕上旧的错误显示，仅在出现新错误时提示（不影响底层日志记录）"):
+                                st.session_state[clear_error_key] = {
+                                    f"{l.get('timestamp')}_{l.get('msg')}" for l in error_logs
+                                }
+                                st.rerun()
+
+                    # Filter visible error logs
+                    if cleared_error_ids:
+                        visible_error_logs = [
+                            l for l in error_logs
+                            if f"{l.get('timestamp')}_{l.get('msg')}" not in cleared_error_ids
+                        ]
+                    else:
+                        visible_error_logs = error_logs
+
+                    if cleared_error_ids and len(visible_error_logs) < len(error_logs):
+                        with col_ctrl1:
+                            st.caption(f"ℹ️ 已清空屏幕旧显示（隐藏 {len(error_logs) - len(visible_error_logs)} 条旧日志，仅监测新错误）")
+
+                    if visible_error_logs:
+                        for log in visible_error_logs[:50]:
                             timestamp = log.get("timestamp", "")
                             message = log.get("msg", "")
                             logger_name = log.get("logger_name", "")
                             st.text(f"{timestamp} - {logger_name}: {message}")
                     else:
-                        st.info("No error logs available.")
+                        if cleared_error_ids:
+                            st.success("✨ 屏幕显示已清空，当前暂无新错误产生。")
+                        else:
+                            st.info("No error logs available.")
 
                 with st.expander("📝 General Logs"):
-                    if general_logs:
-                        for log in general_logs[:50]:
+                    clear_gen_key = f"cleared_gen_ids_{bot_name}"
+                    cleared_gen_ids = st.session_state.get(clear_gen_key, set())
+
+                    col_g1, col_g2 = st.columns([3, 1])
+                    with col_g2:
+                        if cleared_gen_ids:
+                            if st.button("🔄 显示全部", key=f"restore_gen_{bot_name}", use_container_width=True):
+                                st.session_state[clear_gen_key] = set()
+                                st.rerun()
+                        else:
+                            if general_logs and st.button("🧹 清空显示", key=f"clear_gen_{bot_name}", use_container_width=True, help="清空屏幕上旧日志显示，仅在产生新日志时输出（不影响底层日志记录）"):
+                                st.session_state[clear_gen_key] = {
+                                    f"{l.get('timestamp')}_{l.get('msg')}" for l in general_logs
+                                }
+                                st.rerun()
+
+                    # Filter visible general logs
+                    if cleared_gen_ids:
+                        visible_gen_logs = [
+                            l for l in general_logs
+                            if f"{l.get('timestamp')}_{l.get('msg')}" not in cleared_gen_ids
+                        ]
+                    else:
+                        visible_gen_logs = general_logs
+
+                    if cleared_gen_ids and len(visible_gen_logs) < len(general_logs):
+                        with col_g1:
+                            st.caption(f"ℹ️ 已清空屏幕旧显示（隐藏 {len(general_logs) - len(visible_gen_logs)} 条旧日志）")
+
+                    if visible_gen_logs:
+                        for log in visible_gen_logs[:50]:
                             timestamp = pd.to_datetime(int(log.get("timestamp", 0)), unit="s")
                             message = log.get("msg", "")
                             logger_name = log.get("logger_name", "")
                             st.text(f"{timestamp} - {logger_name}: {message}")
                     else:
-                        st.info("No general logs available.")
+                        if cleared_gen_ids:
+                            st.success("✨ 屏幕显示已清空，当前暂无新日志产生。")
+                        else:
+                            st.info("No general logs available.")
 
     except Exception as e:
         with st.container(border=True):
