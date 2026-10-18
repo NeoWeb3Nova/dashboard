@@ -266,17 +266,20 @@ with c_cfg2:
             st.error("无法保存：未选择监控代币！")
         else:
             try:
-                # 1. Save via Backend API
+                # 1. Save via Backend API (Backend API manages conf/scripts inside Docker)
                 backend_api_client.scripts.create_or_update_script_config(
                     config_name=clean_config_name,
                     config=config_dict
                 )
                 
-                # 2. Also ensure written to local bots/conf/scripts if directory exists
+                # 2. Best-effort local file sync if directory is writable
                 local_scripts_conf = os.path.join(os.path.dirname(__file__), "../../../../../hummingbot-api/bots/conf/scripts")
                 if os.path.exists(local_scripts_conf):
-                    with open(os.path.join(local_scripts_conf, f"{clean_config_name}.yml"), "w") as f:
-                        yaml.dump(config_dict, f, default_flow_style=False)
+                    try:
+                        with open(os.path.join(local_scripts_conf, f"{clean_config_name}.yml"), "w") as f:
+                            yaml.dump(config_dict, f, default_flow_style=False)
+                    except Exception:
+                        pass  # Backend API already successfully persisted the file
 
                 st.success(f"🎉 成功保存配置文件: `{clean_config_name}.yml`！")
                 st.session_state["saved_funding_cfg"] = clean_config_name
