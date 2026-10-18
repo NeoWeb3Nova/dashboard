@@ -11,6 +11,23 @@ from frontend.st_utils import get_backend_api_client, initialize_st_page
 
 initialize_st_page(icon="🦅", show_readme=False)
 
+# Anti-flicker CSS to prevent aggressive dimming/flashing during auto-refresh
+st.markdown("""
+<style>
+/* Prevent dimming/flashing during fragment auto-refresh */
+[data-stale="true"],
+[data-stale="true"] * {
+    opacity: 1.0 !important;
+    filter: none !important;
+    transition: none !important;
+}
+/* Ensure Plotly charts and tables remain stable */
+.js-plotly-plot {
+    transition: none !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 # Initialize backend client
 backend_api_client = get_backend_api_client()
 
@@ -20,6 +37,16 @@ if "auto_refresh_enabled" not in st.session_state:
 
 # Set refresh interval
 REFRESH_INTERVAL = 10  # seconds
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def get_cached_market_opportunities():
+    """Cache external cross-exchange funding rates & liquidity to prevent UI network lag and flickering."""
+    try:
+        from frontend.components.funding_scanner import scan_cross_exchange_opportunities
+        return scan_cross_exchange_opportunities()
+    except Exception:
+        return []
 
 
 def render_funding_arbitrage_tables(arb_data, bot_name):
@@ -161,8 +188,7 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
 
             with st.expander("📡 查看全市场 200+ 标的实时高利差机会雷达 (Market Radar)", expanded=False):
                 try:
-                    from frontend.components.funding_scanner import scan_cross_exchange_opportunities
-                    all_opps = scan_cross_exchange_opportunities()
+                    all_opps = get_cached_market_opportunities()
                     if all_opps:
                         st.caption("ℹ️ 当前全市场正在爆发高利差的潜力标的排行榜（如果当前机器人监控币种利差较低，可参考此列表挑选并切换标的）：")
                         radar_rows = []
@@ -201,8 +227,7 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
 
         # Fetch liquidity details for active / watched coins
         try:
-            from frontend.components.funding_scanner import scan_cross_exchange_opportunities
-            opps = scan_cross_exchange_opportunities()
+            opps = get_cached_market_opportunities()
             opp_dict = {o["coin"]: o for o in opps}
         except Exception:
             opp_dict = {}
@@ -268,9 +293,10 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                     yaxis_title="日化费率 % / 天",
                     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
                     height=380,
-                    margin=dict(l=20, r=20, t=50, b=20)
+                    margin=dict(l=20, r=20, t=50, b=20),
+                    transition_duration=0,
                 )
-                st.plotly_chart(fig1, use_container_width=True)
+                st.plotly_chart(fig1, use_container_width=True, key=f"rates_chart_{bot_name}", config={"displayModeBar": False, "responsive": True})
 
             with col_c2:
                 # Chart 2: 24h Volume Liquidity Comparison (Log Scale)
@@ -291,9 +317,10 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                     yaxis_title="24h 成交额 (USD, Log Scale)",
                     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
                     height=380,
-                    margin=dict(l=20, r=20, t=50, b=20)
+                    margin=dict(l=20, r=20, t=50, b=20),
+                    transition_duration=0,
                 )
-                st.plotly_chart(fig2, use_container_width=True)
+                st.plotly_chart(fig2, use_container_width=True, key=f"vol_chart_{bot_name}", config={"displayModeBar": False, "responsive": True})
 
             # Chart 3: Projected Daily Cashflow per token
             st.markdown("##### 💵 各标的 24 小时预期资金费现金流收益 ($/天)")
@@ -308,9 +335,10 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
             fig3.update_layout(
                 yaxis_title="预期日入账 ($ USD)",
                 height=280,
-                margin=dict(l=20, r=20, t=30, b=20)
+                margin=dict(l=20, r=20, t=30, b=20),
+                transition_duration=0,
             )
-            st.plotly_chart(fig3, use_container_width=True)
+            st.plotly_chart(fig3, use_container_width=True, key=f"cashflow_chart_{bot_name}", config={"displayModeBar": False, "responsive": True})
 
             # Liquidity Summary Table
             st.markdown("##### 🛡️ 标的盘口深度评级与安全持仓容量表")
