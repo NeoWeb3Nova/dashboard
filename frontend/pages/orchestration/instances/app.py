@@ -71,15 +71,18 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
     projected_daily_usd = sum(float(p.get("position_size", 0)) * (rate_diff_map.get(p.get("token"), 0.0) / 100.0) for p in active_pos)
     projected_apr = (projected_daily_usd * 365.0 / total_capital * 100.0) if total_capital > 0 else 0.0
 
-    col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+    col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns(5)
+    real_margin_total = total_capital * 2 / 3.0
     with col_m1:
-        st.metric("🎯 名义对冲总仓位", f"${total_capital:,.2f}", f"{len(active_pos)} 个双边对冲组合")
+        st.metric("💼 真实投入本金 (双边保证金)", f"${real_margin_total:,.2f}", "3x 杠杆实缴资金")
     with col_m2:
-        st.metric("💰 累计已收资金费", f"${total_funding_income:+.4f}", "每小时 / 8小时定时到账")
+        st.metric("🎯 合约名义总货值", f"${total_capital:,.2f}", f"{len(active_pos)} 个对冲组合")
     with col_m3:
-        st.metric("⚡ 24h 预期资金费现金流", f"+${projected_daily_usd:,.2f} / 天", f"折算年化 APR {projected_apr:+.2f}%")
+        st.metric("💰 累计已收资金费", f"${total_funding_income:+.4f}", "每小时 / 8小时结算到账")
     with col_m4:
-        st.metric("🛡️ 综合净盈亏 (Net PnL)", f"${net_combined_pnl:+.4f}", "已扣除进出场手续费与价差")
+        st.metric("⚡ 24h 预期现金流", f"+${projected_daily_usd:,.2f} / 天", f"折算年化 {projected_apr:+.2f}%")
+    with col_m5:
+        st.metric("🛡️ 综合净盈亏 (Net PnL)", f"${net_combined_pnl:+.4f}", "价差损益 + 资金费")
 
     # --- Section B: 4 Multi-Dimensional Tabs ---
     tab_pos, tab_closed, tab_rates, tab_charts = st.tabs([
@@ -128,12 +131,20 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                 long_liq_str = f" | 强平: ${liq_long:.4f}" if liq_long > 0 else ""
                 short_liq_str = f" | 强平: ${liq_short:.4f}" if liq_short > 0 else ""
 
+                pos_size = float(p.get('position_size', 0))
+                real_margin = pos_size * 2 / 3.0  # 3x leverage, two legs
+                single_margin = pos_size / 3.0
+                token_sym = p.get('token', '')
+                coin_amt_str = f"{pos_size / long_p:,.0f} {token_sym}" if long_p > 0 else "N/A"
+
                 pos_rows.append({
-                    "标的币种": p.get("token"),
+                    "标的币种": token_sym,
+                    "真实占用本金 (实缴保证金)": f"${real_margin:,.2f} (单边 ${single_margin:,.2f})",
+                    "名义合约货值 (Notional)": f"${pos_size:,.2f}",
+                    "对冲持币量": coin_amt_str,
                     "多头腿 (Long)": f"{long_ex} (买: ${long_p:.4f} | 现: ${curr_long_p:.4f}{long_liq_str})",
                     "空头腿 (Short)": f"{short_ex} (卖: ${short_p:.4f} | 现: ${curr_short_p:.4f}{short_liq_str})",
                     "🛡️ 强平安全距离": health_badge,
-                    "名义头寸": f"${p.get('position_size', 0):.2f}",
                     "累计已收资金费": f"${p.get('funding_income', 0):+.4f} ({p.get('settlement_count', 0)}次)",
                     "盘口浮盈亏": f"${p.get('unrealized_trading_pnl', 0):+.4f}",
                     "综合净收益": f"${p.get('net_pnl', 0):+.4f} ({p.get('net_pnl_pct', 0):+.2%})",
@@ -141,6 +152,19 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                     "下期结算倒计时": countdown_str,
                 })
             st.dataframe(pd.DataFrame(pos_rows), use_container_width=True, hide_index=True)
+
+            with st.expander("🔬 财务核算速递：什么是盘口浮盈亏？为什么刚开仓往往微负？", expanded=False):
+                st.markdown("""
+                * **1. 什么是盘口浮盈亏（Unrealized Trading PnL）？**  
+                  指的是多头与空头两腿在**此时此刻如果立即市价双向平仓**，产生的现货价差损益（已预扣除平仓手续费）：
+                  $$\\text{盘口浮盈亏} = (\\text{多头腿现价损益} + \\text{空头腿现价损益}) - \\text{预估平仓出场手续费}$$
+                * **2. 为什么刚开仓往往是负的（几美金到几十美金）？**  
+                  * **买卖盘口点差摩擦（Bid-Ask Spread）**：以市价平仓时，多头按买一价（Bid）平，空头按卖一价（Ask）平，天然存在微小的点差摩擦（约 0.05%~0.2%）。
+                  * **两所微小基差偏离**：两家交易所对同一个币在几分钟内的波动不是 100% 绝对同步的（例如币安跌了 0.5%，Hyperliquid 只跌了 0.3%），导致微小的暂时价差偏离。
+                * **3. 为什么最终一定能赚钱？（套利的数学本质）**  
+                  $$\\text{综合净收益 (Net PnL)} = \\text{盘口浮盈亏} + \\textbf{累计已收资金费利息}$$
+                  刚开仓时会有轻微的现货点差摩擦（如 -0.1% ~ -0.4%），但**定时到账的高额资金费利息（+Funding Income）会源源不断滚入累加，迅速覆盖并超越开仓摩擦**，最终将综合净收益推向正利润，直至触发 1.0% 的目标止盈！
+                """)
         else:
             thresh_pct = arb_data.get("min_funding_rate_profitability_pct", 0.1)
             best_token = "N/A"
