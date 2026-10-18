@@ -73,7 +73,21 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                 })
             st.dataframe(pd.DataFrame(pos_rows), use_container_width=True, hide_index=True)
         else:
-            st.info("ℹ️ 当前暂无持仓中头寸。策略正在持续比对两所实时资金费率，一旦出现利差机会将在此处自动展示多空建仓与利息明细。")
+            thresh_pct = arb_data.get("min_funding_rate_profitability_pct", 0.1)
+            best_token = "N/A"
+            best_diff = 0.0
+            for m in market_comp:
+                d = m.get("daily_rate_diff_pct", 0)
+                if d > best_diff:
+                    best_diff = d
+                    best_token = m.get("token")
+            st.info(
+                f"ℹ️ **当前暂无持仓中头寸（策略正在实时巡检风控观望中）**\n\n"
+                f"- **🎯 当前设定开仓门槛**：日化利差需 **≥ {thresh_pct:+.4f}% / 天**（折合年化 APR **{thresh_pct * 365:+.2f}%**）\n"
+                f"- **📊 当前市场最大利差**：`{best_token}` 为 **{best_diff:+.4f}% / 天**（距触发开仓还差 **`{(thresh_pct - best_diff):.4f}%`**）\n"
+                f"- **🛡️ 为什么不立即开仓？** 跨所双边对冲开仓需扣除 Taker 手续费（双边合计约 0.08%~0.12%），若在微小利差下盲目进场会被手续费侵蚀，因此策略严格遵守安全门槛。\n"
+                f"- **💡 立即预演测试建议**：若希望在 Dry-Run 模式下立刻体验多空持仓与资金费定时结算，可将配置中的 `min_funding_rate_profitability` 调低至 `0.0001`（0.01%/天）或 `0`。"
+            )
 
     with tab_closed:
         if closed_trades:
@@ -95,18 +109,21 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
             st.info("ℹ️ 暂无历史平仓记录。")
 
     with tab_rates:
+        thresh_pct = arb_data.get("min_funding_rate_profitability_pct", 0.1)
+        st.caption(f"ℹ️ 策略后台实时扫描的各币种利差对比（当前设定开仓门槛：日化利差 ≥ {thresh_pct:+.4f}% / 天）")
         if market_comp:
-            st.caption("ℹ️ 策略后台实时扫描的各币种在不同交易所的资金费率及最佳套利利差")
             rates_rows = []
             for m in market_comp:
                 daily_diff = m.get('daily_rate_diff_pct', 0)
                 apr_val = daily_diff * 365
                 apr_str = f"{apr_val:+.2f}%" if abs(apr_val) < 10000 else f"{apr_val:+.2e}%"
+                status_str = "✅ 已达标 (开仓)" if daily_diff >= thresh_pct else f"⏳ 观望中 (差 {(thresh_pct - daily_diff):.4f}%)"
                 row = {
                     "监控币种": m.get("token"),
                     "推荐套利组合 (Path)": m.get("best_path", "N/A"),
                     "折算日化利差 (Daily Diff)": f"{daily_diff:+.4f}% / 天" if abs(daily_diff) < 1000 else f"{daily_diff:+.2e}% / 天",
                     "折算年化利差 (APR)": apr_str,
+                    "门槛达标状态": status_str,
                 }
                 for k, v in m.items():
                     if k.endswith("_rate_daily"):
