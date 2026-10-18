@@ -172,6 +172,13 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                 net_pnl = float(p.get('net_pnl', 0))
                 net_pct = float(p.get('net_pnl_pct', 0))
 
+                long_coin = pos_size / long_p if long_p > 0 else 0
+                short_coin = pos_size / short_p if short_p > 0 else 0
+                long_leg_pnl = (curr_long_p - long_p) * long_coin
+                short_leg_pnl = (short_p - curr_short_p) * short_coin
+                open_basis = (short_p - long_p) / long_p * 100.0 if long_p > 0 else 0.0
+                curr_basis = (curr_long_p - curr_short_p) / curr_short_p * 100.0 if curr_short_p > 0 else 0.0
+
                 pos_card_items.append({
                     "token": token_sym,
                     "side": side,
@@ -204,6 +211,10 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                     "countdown_str": countdown_str,
                     "next_f1": next_f1,
                     "next_f2": next_f2,
+                    "long_leg_pnl": long_leg_pnl,
+                    "short_leg_pnl": short_leg_pnl,
+                    "open_basis": open_basis,
+                    "curr_basis": curr_basis,
                 })
 
                 # Compact Table Row: compact columns without excessive text bloat
@@ -269,17 +280,20 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                             st.markdown("##### 🛡️ 双腿盘口与强平防线")
                             st.markdown(f"""
                             - 🟢 **多头腿 (`{item['long_ex']}`)**:
-                              - 开仓买入: `${item['long_p']:.4f}` → 现价: `${item['curr_long_p']:.4f}`
+                              - 买入: `${item['long_p']:.4f}` → 现价: `${item['curr_long_p']:.4f}` | 单腿损益: **`${item['long_leg_pnl']:+.2f}`**
                               - 预估强平: `${item['liq_long']:.4f}` *(安全垫: `+{item['dist_long']:.1%}`)*
                             - 🔴 **空头腿 (`{item['short_ex']}`)**:
-                              - 开仓卖出: `${item['short_p']:.4f}` → 现价: `${item['curr_short_p']:.4f}`
+                              - 卖出: `${item['short_p']:.4f}` → 现价: `${item['curr_short_p']:.4f}` | 单腿损益: **`${item['short_leg_pnl']:+.2f}`**
                               - 预估强平: `${item['liq_short']:.4f}` *(安全垫: `+{item['dist_short']:.1%}`)*
+                            - ⚖️ **双腿价差与滑点对冲损益**:
+                              - 开仓两所价差: `{item['open_basis']:+.3f}%` → 当前平仓价差: `{item['curr_basis']:+.3f}%`
+                              - 两腿对冲价差净损益: **`${item['unrealized_pnl']:+.4f}`** *(多头 ${item['long_leg_pnl']:+.2f} + 空头 ${item['short_leg_pnl']:+.2f})*
                             """)
 
                         with col_c:
                             st.markdown("##### 📈 实时损益与费率利息")
                             st.markdown(f"""
-                            - **盘口浮亏 (点差摩擦)**: `${item['unrealized_pnl']:+.4f}`
+                            - **盘口价差净损益 (对冲摩擦)**: `${item['unrealized_pnl']:+.4f}`
                             - **累计已收资金费**: **`${item['funding_inc']:+.4f}`** *(已结 `{item['settle_cnt']}` 次)*
                             - **综合净利润**: **`${item['net_pnl']:+.4f}`**
                             - **下期资金费结算**: 约 `{min(item['next_f1'], item['next_f2'])}m` 后到账
@@ -308,6 +322,13 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                   * **严密验算公式**：
                     $$\\mathbf{\\$12,466.67 (实缴总本金)} \\times \\mathbf{3 (杠杆倍数)} = \\mathbf{\\$37,400.00 (双边合约总货值)}$$
                     两者完全严丝合缝！此前界面将单边的 $18,700 简称为“总货值”，导致产生了 1.5 倍的错觉，现已全面显性化双边总货值与单边对冲货值！
+                * **5. 为什么说“盘口浮盈亏”就是两所开平仓的价差成本？**  
+                  许多人会有疑问：“开仓时有价差，平仓时又有价差，如果价差扩大，这个成本到底在哪里体现？”  
+                  **答案是：系统每 10 秒刷新的「盘口浮盈亏」，计算的就是这个双边价差变动（基差漂移）！**  
+                  $$\\text{盘口浮盈亏} = \\underbrace{(P_{\\text{卖,现}} - P_{\\text{买,开}}) \\times Q}_{\\text{多头腿损益}} + \\underbrace{(P_{\\text{卖,开}} - P_{\\text{买,现}}) \\times Q}_{\\text{空头腿损益}} = \\mathbf{\\Big[ \\Delta_{\\text{开仓两所价差}} - \\Delta_{\\text{平仓两所价差}} \\Big] \\times Q}$$  
+                  * **价差扩大**：如果平仓时两所价差朝着不利方向扩大，多空两腿对冲后损益会暂时为负，**完全实时体现在“盘口浮亏”里，一分钱都不会漏算**；  
+                  * **价差收窄**：随着两所套利资金抹平基差，价差回归到 0，多空对冲损益就会回归到 0；  
+                  * **全订单簿深度滑点预扣**：系统并非按理想中间价测算，而是调用了深度撮合算法（VWAP），**把此时此刻市价吃单的真实冲击滑点全部直接算进了成本**！
                 """)
         else:
             thresh_pct = arb_data.get("min_funding_rate_profitability_pct", 0.1)
