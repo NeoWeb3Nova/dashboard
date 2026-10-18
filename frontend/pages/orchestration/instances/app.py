@@ -71,10 +71,17 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
     projected_daily_usd = sum(float(p.get("position_size", 0)) * (rate_diff_map.get(p.get("token"), 0.0) / 100.0) for p in active_pos)
     projected_apr = (projected_daily_usd * 365.0 / total_capital * 100.0) if total_capital > 0 else 0.0
 
+    global_leverage = int(arb_data.get("leverage", 3))
+    real_margin_total = sum(
+        float(p.get("position_size", 0)) * (
+            1.0 / float(p.get("long_leverage", p.get("leverage", global_leverage))) +
+            1.0 / float(p.get("short_leverage", p.get("leverage", global_leverage)))
+        ) for p in active_pos
+    )
+
     col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns(5)
-    real_margin_total = total_capital * 2 / 3.0
     with col_m1:
-        st.metric("💼 真实投入本金 (双边保证金)", f"${real_margin_total:,.2f}", "3x 杠杆实缴资金")
+        st.metric("💼 真实投入本金 (双边保证金)", f"${real_margin_total:,.2f}", f"多空 {global_leverage}x 杠杆实缴")
     with col_m2:
         st.metric("🎯 合约名义总货值", f"${total_capital:,.2f}", f"{len(active_pos)} 个对冲组合")
     with col_m3:
@@ -94,8 +101,21 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
 
     with tab_pos:
         if active_pos:
-            st.caption("ℹ️ 当前正在双边对冲并按期收取资金费的套利头寸（随交易所盘口每 10 秒自动刷新）")
-            pos_rows = []
+            top_c1, top_c2 = st.columns([3, 2])
+            with top_c1:
+                st.caption("ℹ️ 当前正在双边对冲并按期收取资金费的套利头寸（随交易所盘口每 10 秒自动刷新）")
+            with top_c2:
+                pos_view = st.radio(
+                    "持仓展示模式",
+                    ["🗂️ 结构化卡片透视 (免横向滚动，推荐)", "📋 精简总览表格 (紧凑免滚)"],
+                    horizontal=True,
+                    label_visibility="collapsed",
+                    key=f"pos_view_mode_{bot_name}"
+                )
+
+            pos_card_items = []
+            pos_table_rows = []
+
             for p in active_pos:
                 duration_min = p.get("duration_seconds", 0) // 60
                 dur_str = f"{duration_min // 60}h {duration_min % 60}m"
@@ -116,7 +136,20 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                 c2_abbr = short_ex.split('_')[0].capitalize()
                 countdown_str = f"{c1_abbr}: {next_f1}m | {c2_abbr}: {next_f2}m"
 
-                min_dist = p.get("min_liq_distance_pct", 0.30)
+                # Leverage handling
+                lev = int(p.get("leverage") or arb_data.get("leverage") or 3)
+                long_lev = int(p.get("long_leverage") or lev)
+                short_lev = int(p.get("short_leverage") or lev)
+
+                # Distance & Liquidation
+                liq_p1 = p.get("liq_price_1", 0)
+                liq_p2 = p.get("liq_price_2", 0)
+                liq_long = liq_p1 if side == "BUY" else liq_p2
+                liq_short = liq_p2 if side == "BUY" else liq_p1
+                dist_long = p.get("liq_distance_1_pct", 0.30) if side == "BUY" else p.get("liq_distance_2_pct", 0.30)
+                dist_short = p.get("liq_distance_2_pct", 0.30) if side == "BUY" else p.get("liq_distance_1_pct", 0.30)
+
+                min_dist = p.get("min_liq_distance_pct", min(dist_long, dist_short))
                 if min_dist >= 0.20:
                     health_badge = f"🟢 充沛 (+{min_dist:.1%})"
                 elif min_dist >= 0.12:
@@ -124,34 +157,131 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                 else:
                     health_badge = f"🔴 警戒 (+{min_dist:.1%})"
 
-                liq_p1 = p.get("liq_price_1", 0)
-                liq_p2 = p.get("liq_price_2", 0)
-                liq_long = liq_p1 if side == "BUY" else liq_p2
-                liq_short = liq_p2 if side == "BUY" else liq_p1
-                long_liq_str = f" | 强平: ${liq_long:.4f}" if liq_long > 0 else ""
-                short_liq_str = f" | 强平: ${liq_short:.4f}" if liq_short > 0 else ""
-
                 pos_size = float(p.get('position_size', 0))
-                real_margin = pos_size * 2 / 3.0  # 3x leverage, two legs
-                single_margin = pos_size / 3.0
+                single_long_margin = pos_size / long_lev if long_lev > 0 else pos_size / 3.0
+                single_short_margin = pos_size / short_lev if short_lev > 0 else pos_size / 3.0
+                real_margin = single_long_margin + single_short_margin
                 token_sym = p.get('token', '')
                 coin_amt_str = f"{pos_size / long_p:,.0f} {token_sym}" if long_p > 0 else "N/A"
 
-                pos_rows.append({
-                    "标的币种": token_sym,
-                    "真实占用本金 (实缴保证金)": f"${real_margin:,.2f} (单边 ${single_margin:,.2f})",
-                    "名义合约货值 (Notional)": f"${pos_size:,.2f}",
-                    "对冲持币量": coin_amt_str,
-                    "多头腿 (Long)": f"{long_ex} (买: ${long_p:.4f} | 现: ${curr_long_p:.4f}{long_liq_str})",
-                    "空头腿 (Short)": f"{short_ex} (卖: ${short_p:.4f} | 现: ${curr_short_p:.4f}{short_liq_str})",
-                    "🛡️ 强平安全距离": health_badge,
-                    "累计已收资金费": f"${p.get('funding_income', 0):+.4f} ({p.get('settlement_count', 0)}次)",
-                    "盘口浮盈亏": f"${p.get('unrealized_trading_pnl', 0):+.4f}",
-                    "综合净收益": f"${p.get('net_pnl', 0):+.4f} ({p.get('net_pnl_pct', 0):+.2%})",
-                    "持仓时长": dur_str,
-                    "下期结算倒计时": countdown_str,
+                unrealized_pnl = float(p.get('unrealized_trading_pnl', 0))
+                funding_inc = float(p.get('funding_income', 0))
+                settle_cnt = int(p.get('settlement_count', 0))
+                net_pnl = float(p.get('net_pnl', 0))
+                net_pct = float(p.get('net_pnl_pct', 0))
+
+                pos_card_items.append({
+                    "token": token_sym,
+                    "side": side,
+                    "long_ex": long_ex,
+                    "short_ex": short_ex,
+                    "c1_abbr": c1_abbr,
+                    "c2_abbr": c2_abbr,
+                    "long_lev": long_lev,
+                    "short_lev": short_lev,
+                    "long_p": long_p,
+                    "short_p": short_p,
+                    "curr_long_p": curr_long_p,
+                    "curr_short_p": curr_short_p,
+                    "liq_long": liq_long,
+                    "liq_short": liq_short,
+                    "dist_long": dist_long,
+                    "dist_short": dist_short,
+                    "health_badge": health_badge,
+                    "pos_size": pos_size,
+                    "single_long_margin": single_long_margin,
+                    "single_short_margin": single_short_margin,
+                    "real_margin": real_margin,
+                    "coin_amt_str": coin_amt_str,
+                    "unrealized_pnl": unrealized_pnl,
+                    "funding_inc": funding_inc,
+                    "settle_cnt": settle_cnt,
+                    "net_pnl": net_pnl,
+                    "net_pct": net_pct,
+                    "dur_str": dur_str,
+                    "countdown_str": countdown_str,
+                    "next_f1": next_f1,
+                    "next_f2": next_f2,
                 })
-            st.dataframe(pd.DataFrame(pos_rows), use_container_width=True, hide_index=True)
+
+                # Compact Table Row: 9 compact columns without excessive text bloat
+                lev_tag = f"多{long_lev}x/空{short_lev}x" if long_lev != short_lev else f"多空{long_lev}x"
+                pos_table_rows.append({
+                    "标的 (杠杆)": f"{token_sym} ({lev_tag})",
+                    "对冲路径": f"🟢{c1_abbr}(多) ⇄ 🔴{c2_abbr}(空)",
+                    "实缴本金": f"${real_margin:,.2f}",
+                    "名义货值": f"${pos_size:,.2f}",
+                    "持币数量": coin_amt_str,
+                    "强平安全垫": health_badge,
+                    "盘口浮亏": f"${unrealized_pnl:+.4f}",
+                    "累计资金费": f"${funding_inc:+.4f} ({settle_cnt}次)",
+                    "综合净收益": f"${net_pnl:+.4f} ({net_pct:+.2%})",
+                    "持仓时长": dur_str,
+                    "下期结算": f"{min(next_f1, next_f2)}m 后",
+                })
+
+            if "卡片" in pos_view:
+                for item in pos_card_items:
+                    with st.container(border=True):
+                        # Top bar of the card
+                        c_hd1, c_hd2, c_hd3 = st.columns([1.8, 2.0, 1.2])
+                        with c_hd1:
+                            st.markdown(
+                                f"#### 🪙 `{item['token']}` &nbsp; "
+                                f"<span style='font-size:13px; background:#1e293b; border:1px solid #334155; padding:3px 8px; border-radius:4px; color:#38bdf8; font-weight:600;'>"
+                                f"⚡ 杠杆: 做多 {item['long_lev']}x | 做空 {item['short_lev']}x</span>",
+                                unsafe_allow_html=True
+                            )
+                            st.caption(f"🧭 **对冲配对**: `🟢 {item['long_ex']} (多)` ⇄ `🔴 {item['short_ex']} (空)`")
+                        with c_hd2:
+                            st.markdown(f"⏱️ **持仓时长**: `{item['dur_str']}` &nbsp;&nbsp;|&nbsp;&nbsp; ⏳ **结算倒计时**: `{item['countdown_str']}`")
+                            st.markdown(f"🛡️ **强平安全盾**: `{item['health_badge']}` *(≤8% 自动市价防守平仓)*")
+                        with c_hd3:
+                            pnl_color = "#00e676" if item['net_pnl'] >= 0 else "#ff5252"
+                            st.markdown(
+                                f"<div style='text-align:right; padding-top:2px;'>"
+                                f"<span style='font-size:12px; color:#94a3b8;'>综合净收益 (Net PnL)</span><br>"
+                                f"<span style='font-size:22px; font-weight:bold; color:{pnl_color};'>${item['net_pnl']:+.4f}</span><br>"
+                                f"<span style='font-size:13px; color:{pnl_color}; font-weight:500;'>{item['net_pct']:+.2%}</span>"
+                                f"</div>",
+                                unsafe_allow_html=True
+                            )
+
+                        st.divider()
+
+                        # 3-column Bento details
+                        col_a, col_b, col_c = st.columns([1.1, 1.4, 1.1])
+                        with col_a:
+                            st.markdown("##### 💼 资金规模与开仓杠杆")
+                            st.markdown(f"""
+                            - **实缴本金 (保证金)**: **`${item['real_margin']:,.2f}`**
+                            - **单腿保证金**: 多 `${item['single_long_margin']:,.2f}` + 空 `${item['single_short_margin']:,.2f}`
+                            - **名义对冲总货值**: **`${item['pos_size']:,.2f}`**
+                            - **持币对冲数量**: `{item['coin_amt_str']}`
+                            - **开仓杠杆倍数**: **做多 `{item['long_lev']}x` | 做空 `{item['short_lev']}x`**
+                            """)
+
+                        with col_b:
+                            st.markdown("##### 🛡️ 双腿盘口与强平防线")
+                            st.markdown(f"""
+                            - 🟢 **多头腿 (`{item['long_ex']}`)**:
+                              - 开仓买入: `${item['long_p']:.4f}` → 现价: `${item['curr_long_p']:.4f}`
+                              - 预估强平: `${item['liq_long']:.4f}` *(安全垫: `+{item['dist_long']:.1%}`)*
+                            - 🔴 **空头腿 (`{item['short_ex']}`)**:
+                              - 开仓卖出: `${item['short_p']:.4f}` → 现价: `${item['curr_short_p']:.4f}`
+                              - 预估强平: `${item['liq_short']:.4f}` *(安全垫: `+{item['dist_short']:.1%}`)*
+                            """)
+
+                        with col_c:
+                            st.markdown("##### 📈 实时损益与费率利息")
+                            st.markdown(f"""
+                            - **盘口浮亏 (点差摩擦)**: `${item['unrealized_pnl']:+.4f}`
+                            - **累计已收资金费**: **`${item['funding_inc']:+.4f}`** *(已结 `{item['settle_cnt']}` 次)*
+                            - **综合净利润**: **`${item['net_pnl']:+.4f}`**
+                            - **下期资金费结算**: 约 `{min(item['next_f1'], item['next_f2'])}m` 后到账
+                            """)
+            else:
+                st.dataframe(pd.DataFrame(pos_table_rows), use_container_width=True, hide_index=True)
 
             with st.expander("🔬 财务核算速递：什么是盘口浮盈亏？为什么刚开仓往往微负？", expanded=False):
                 st.markdown("""
