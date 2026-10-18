@@ -99,20 +99,77 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
             st.caption("ℹ️ 策略后台实时扫描的各币种在不同交易所的资金费率及最佳套利利差")
             rates_rows = []
             for m in market_comp:
+                daily_diff = m.get('daily_rate_diff_pct', 0)
+                apr_val = daily_diff * 365
+                apr_str = f"{apr_val:+.2f}%" if abs(apr_val) < 10000 else f"{apr_val:+.2e}%"
                 row = {
                     "监控币种": m.get("token"),
                     "推荐套利组合 (Path)": m.get("best_path", "N/A"),
-                    "折算日化利差 (Daily Diff)": f"{m.get('daily_rate_diff_pct', 0):+.4f}% / 天",
-                    "折算年化利差 (APR)": f"{m.get('daily_rate_diff_pct', 0) * 365:+.2f}%",
+                    "折算日化利差 (Daily Diff)": f"{daily_diff:+.4f}% / 天" if abs(daily_diff) < 1000 else f"{daily_diff:+.2e}% / 天",
+                    "折算年化利差 (APR)": apr_str,
                 }
                 for k, v in m.items():
                     if k.endswith("_rate_daily"):
                         c_title = k.replace("_rate_daily", "")
-                        row[f"{c_title} 费率 (日化)"] = f"{v:+.4f}%"
+                        v_str = f"{v:+.4f}%" if abs(v) < 1000 else f"{v:+.2e}%"
+                        row[f"{c_title} 费率 (日化)"] = v_str
                 rates_rows.append(row)
             st.dataframe(pd.DataFrame(rates_rows), use_container_width=True, hide_index=True)
         else:
             st.info("ℹ️ 正在连接交易所拉取实时费率对比数据...")
+
+
+def get_bot_funding_arbitrage_data(bot_name, performance):
+    """Retrieve funding arbitrage custom_info from MQTT performance or local disk."""
+    arb_data = None
+    for ctrl_id, ctrl_dict in performance.items():
+        c_info = ctrl_dict.get("custom_info", {})
+        if "active_positions" in c_info or "closed_trades" in c_info or "market_comparison" in c_info:
+            arb_data = c_info
+            break
+
+    local_json = os.path.abspath(os.path.join(
+        os.path.dirname(__file__),
+        f"../../../../../hummingbot-api/bots/instances/{bot_name}/data/arbitrage_trades.json"
+    ))
+    if not arb_data and os.path.exists(local_json):
+        try:
+            with open(local_json, "r") as jf:
+                arb_data = json.load(jf)
+        except Exception:
+            pass
+
+    # Check if bot is a funding rate arbitrage bot
+    is_funding_arb_bot = (
+        "funding" in bot_name.lower() or 
+        "funding_rate_arb" in performance or 
+        arb_data is not None
+    )
+    if not is_funding_arb_bot:
+        scripts_conf_dir = os.path.abspath(os.path.join(
+            os.path.dirname(__file__),
+            f"../../../../../hummingbot-api/bots/instances/{bot_name}/conf/scripts"
+        ))
+        if os.path.isdir(scripts_conf_dir):
+            for fname in os.listdir(scripts_conf_dir):
+                if fname.endswith(".yml") or fname.endswith(".yaml"):
+                    try:
+                        with open(os.path.join(scripts_conf_dir, fname), "r") as f:
+                            if "funding" in f.read():
+                                is_funding_arb_bot = True
+                                break
+                    except Exception:
+                        pass
+
+    if is_funding_arb_bot and not arb_data:
+        arb_data = {
+            "is_dry_run": True,
+            "active_positions": [],
+            "closed_trades": [],
+            "market_comparison": []
+        }
+
+    return is_funding_arb_bot, arb_data
 
 
 def stop_bot(bot_name):
@@ -241,6 +298,8 @@ def render_bot_card(bot_name):
                     total_unrealized_pnl_quote = 0
 
                     for controller, inner_dict in performance.items():
+                        if controller == "funding_rate_arb":
+                            continue
                         controller_status = inner_dict.get("status")
                         if controller_status == "error":
                             error_controllers.append({
@@ -310,6 +369,11 @@ def render_bot_card(bot_name):
                         st.metric("📊 NET PNL (%)", f"{total_global_pnl_pct:.2%}")
                     with col4:
                         st.metric("💸 Volume Traded", f"${total_volume_traded:.2f}")
+
+                    # Funding Rate Arbitrage Visual Section
+                    is_funding_arb_bot, arb_data = get_bot_funding_arbitrage_data(bot_name, performance)
+                    if is_funding_arb_bot:
+                        render_funding_arbitrage_tables(arb_data, bot_name)
 
                     # Active Controllers
                     if active_controllers:
@@ -387,27 +451,10 @@ def render_bot_card(bot_name):
                         error_df = pd.DataFrame(error_controllers)
                         st.dataframe(error_df, use_container_width=True, hide_index=True)
 
-                    # Funding Rate Arbitrage Visual Section
-                    arb_data = None
-                    for ctrl_id, ctrl_dict in performance.items():
-                        c_info = ctrl_dict.get("custom_info", {})
-                        if "active_positions" in c_info or "closed_trades" in c_info or "market_comparison" in c_info:
-                            arb_data = c_info
-                            break
-
-                    if not arb_data:
-                        local_json = os.path.abspath(os.path.join(
-                            os.path.dirname(__file__),
-                            f"../../../../../hummingbot-api/bots/instances/{bot_name}/data/arbitrage_trades.json"
-                        ))
-                        if os.path.exists(local_json):
-                            try:
-                                with open(local_json, "r") as jf:
-                                    arb_data = json.load(jf)
-                            except Exception:
-                                pass
-
-                    if arb_data:
+                else:
+                    # For stopped bots, still show historical arbitrage data if present
+                    is_funding_arb_bot, arb_data = get_bot_funding_arbitrage_data(bot_name, performance)
+                    if is_funding_arb_bot and (arb_data.get("closed_trades") or arb_data.get("active_positions")):
                         render_funding_arbitrage_tables(arb_data, bot_name)
 
                 # Logs sections (available for both running and stopped bots)
