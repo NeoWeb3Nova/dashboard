@@ -101,6 +101,7 @@ def scan_cross_exchange_opportunities(
         results.append({
             "coin": coin,
             "daily_diff_pct": daily_diff * 100.0,
+            "diff_daily_pct": daily_diff * 100.0,
             "apr": apr,
             "best_path": best_path,
             "connector_1_rate_daily": h_daily * 100.0,

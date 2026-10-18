@@ -177,7 +177,7 @@ with st.expander(f"📡 点击展开：全市场实时利差机会排行榜 (已
     col_filter1, col_filter2, col_filter3 = st.columns([2, 1, 1])
     with col_filter1:
         if live_opps:
-            st.markdown(f"🔥 当前全市场最高套利机会：**{live_opps[0]['coin']}** (年化 APR **{live_opps[0]['apr']:.2f}%**, 日化 **{live_opps[0]['diff_daily_pct']:+.4f}%/天**)")
+            st.markdown(f"🔥 当前全市场最高套利机会：**{live_opps[0]['coin']}** (年化 APR **{live_opps[0]['apr']:.2f}%**, 日化 **{live_opps[0]['daily_diff_pct']:+.4f}%/天**)")
         else:
             st.markdown("ℹ️ 暂未获取到全市场费率，请点击刷新。")
     with col_filter2:
