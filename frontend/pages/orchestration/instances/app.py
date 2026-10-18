@@ -78,16 +78,18 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
             1.0 / float(p.get("short_leverage", p.get("leverage", global_leverage)))
         ) for p in active_pos
     )
+    gross_capital = total_capital * 2.0
+    roe_apr = (projected_daily_usd * 365.0 / real_margin_total * 100.0) if real_margin_total > 0 else 0.0
 
     col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns(5)
     with col_m1:
-        st.metric("💼 真实投入本金 (双边保证金)", f"${real_margin_total:,.2f}", f"多空 {global_leverage}x 杠杆实缴")
+        st.metric("💼 真实实缴本金 (总保证金)", f"${real_margin_total:,.2f}", f"多空 {global_leverage}x 实缴 (单边 ${real_margin_total/2:,.2f})")
     with col_m2:
-        st.metric("🎯 合约名义总货值", f"${total_capital:,.2f}", f"{len(active_pos)} 个对冲组合")
+        st.metric("🎯 双边合约总货值 (Gross)", f"${gross_capital:,.2f}", f"单边对冲 ${total_capital:,.2f} (本金×{global_leverage}x)")
     with col_m3:
         st.metric("💰 累计已收资金费", f"${total_funding_income:+.4f}", "每小时 / 8小时结算到账")
     with col_m4:
-        st.metric("⚡ 24h 预期现金流", f"+${projected_daily_usd:,.2f} / 天", f"折算年化 {projected_apr:+.2f}%")
+        st.metric("⚡ 24h 预期现金流", f"+${projected_daily_usd:,.2f} / 天", f"本金年化 ROE {roe_apr:+.2f}%")
     with col_m5:
         st.metric("🛡️ 综合净盈亏 (Net PnL)", f"${net_combined_pnl:+.4f}", "价差损益 + 资金费")
 
@@ -204,13 +206,14 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                     "next_f2": next_f2,
                 })
 
-                # Compact Table Row: 9 compact columns without excessive text bloat
+                # Compact Table Row: compact columns without excessive text bloat
                 lev_tag = f"多{long_lev}x/空{short_lev}x" if long_lev != short_lev else f"多空{long_lev}x"
                 pos_table_rows.append({
                     "标的 (杠杆)": f"{token_sym} ({lev_tag})",
                     "对冲路径": f"🟢{c1_abbr}(多) ⇄ 🔴{c2_abbr}(空)",
                     "实缴本金": f"${real_margin:,.2f}",
-                    "名义货值": f"${pos_size:,.2f}",
+                    "单边货值": f"${pos_size:,.2f}",
+                    "双边总货值": f"${pos_size * 2:,.2f}",
                     "持币数量": coin_amt_str,
                     "强平安全垫": health_badge,
                     "盘口浮亏": f"${unrealized_pnl:+.4f}",
@@ -254,10 +257,11 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                         with col_a:
                             st.markdown("##### 💼 资金规模与开仓杠杆")
                             st.markdown(f"""
-                            - **实缴本金 (保证金)**: **`${item['real_margin']:,.2f}`**
-                            - **单腿保证金**: 多 `${item['single_long_margin']:,.2f}` + 空 `${item['single_short_margin']:,.2f}`
-                            - **名义对冲总货值**: **`${item['pos_size']:,.2f}`**
-                            - **持币对冲数量**: `{item['coin_amt_str']}`
+                            - **实缴本金 (双边保证金)**: **`${item['real_margin']:,.2f}`**
+                              - *(多头保证金 `${item['single_long_margin']:,.2f}` + 空头保证金 `${item['single_short_margin']:,.2f}`)*
+                            - **双边合约总货值**: **`${item['pos_size'] * 2:,.2f}`** *(实缴本金 `${item['real_margin']:,.2f}` × {item['long_lev']}x 杠杆)*
+                            - **单边对冲货值**: **`${item['pos_size']:,.2f}`** *(多空两腿各持仓 `${item['pos_size']:,.2f}`)*
+                            - **持币对冲数量**: `{item['coin_amt_str']}` *(双向等量持币)*
                             - **开仓杠杆倍数**: **做多 `{item['long_lev']}x` | 做空 `{item['short_lev']}x`**
                             """)
 
@@ -294,6 +298,16 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                 * **3. 为什么最终一定能赚钱？（套利的数学本质）**  
                   $$\\text{综合净收益 (Net PnL)} = \\text{盘口浮盈亏} + \\textbf{累计已收资金费利息}$$
                   刚开仓时会有轻微的现货点差摩擦（如 -0.1% ~ -0.4%），但**定时到账的高额资金费利息（+Funding Income）会源源不断滚入累加，迅速覆盖并超越开仓摩擦**，最终将综合净收益推向正利润，直至触发 1.0% 的目标止盈！
+                * **4. 财务核算必读：为什么实缴本金 $12,466 对应双边合约总货值 $37,400？**  
+                  在双边跨所资金费率对冲套利中，存在 **“单边对冲货值”** 与 **“双边合约总货值”** 的区别：
+                  * **单边对冲货值 ($18,700)**：指的是单腿的名义价值（比如在币安做多 $18,700 合约）。
+                  * **双边合约总货值 ($37,400)**：因为这是绝对对冲套利，必须同时在 Hyperliquid 做空等额的 $18,700 合约！两腿合计控制的合约总资产价值为：
+                    $$\\text{双边合约总货值} = \\text{多头货值 (\\$18,700)} + \\text{空头货值 (\\$18,700)} = \\mathbf{\\$37,400}$$
+                  * **实缴保证金 (总本金 $12,466.67)**：在 3 倍杠杆下，每条腿需要占用 $18,700 \\div 3 = \\$6,233.33$ 保证金，两腿合计投入：
+                    $$\\text{实缴总保证金} = \\$6,233.33 + \\$6,233.33 = \\mathbf{\\$12,466.67}$$
+                  * **严密验算公式**：
+                    $$\\mathbf{\\$12,466.67 (实缴总本金)} \\times \\mathbf{3 (杠杆倍数)} = \\mathbf{\\$37,400.00 (双边合约总货值)}$$
+                    两者完全严丝合缝！此前界面将单边的 $18,700 简称为“总货值”，导致产生了 1.5 倍的错觉，现已全面显性化双边总货值与单边对冲货值！
                 """)
         else:
             thresh_pct = arb_data.get("min_funding_rate_profitability_pct", 0.1)
