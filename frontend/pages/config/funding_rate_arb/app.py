@@ -334,12 +334,13 @@ if deploy_btn:
                     config=config_dict
                 )
                 
-                # 调用 deploy_v2_script
+                # 调用 deploy_v2_script，确保 script_config 带有 .yml 后缀
+                cfg_with_ext = active_saved_cfg if active_saved_cfg.endswith((".yml", ".yaml")) else f"{active_saved_cfg}.yml"
                 deploy_res = backend_api_client.bot_orchestration.deploy_v2_script(
                     instance_name=clean_bot_name,
                     credentials_profile=selected_cred,
                     script="v2_funding_rate_arb",
-                    script_config=active_saved_cfg,
+                    script_config=cfg_with_ext,
                     image=image_name
                 )
                 
