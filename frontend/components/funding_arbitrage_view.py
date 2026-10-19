@@ -115,7 +115,7 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
         st.warning(
             f"⚠️ **【量化高精度时钟风险拦截警报】**：本地系统时钟与 Binance 合约服务器偏差达到 **`{clock_health.get('offset_ms', 0):+.0f}ms`**（逼近 1000ms 拒单红线）！\n\n"
             f"- **风险成因**：WSL2/系统休眠唤醒后虚拟化时钟未对齐，高频下单极易遭遇交易所 `code: -1021 (Timestamp outside recvWindow)` 拒单，导致**一腿开平仓成功、一腿被拒单（裸奔风险）**！\n"
-            f"- **一键修复指南**：在宿主机终端执行 `sudo hwclock -s` 立即对齐时钟，或运行 `python3 scripts/check-clock-sync.py` 诊断。"
+            f"- **一键修复指南**：在宿主机终端执行 `sudo systemctl restart systemd-timesyncd` 立即对齐时钟（切勿执行 `hwclock -s` 覆写硬件粗时间），或运行 `python3 scripts/check-clock-sync.py` 诊断。"
         )
 
 
