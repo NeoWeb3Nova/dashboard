@@ -225,23 +225,34 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
     with col_m5:
         st.metric("🛡️ 综合净盈亏 (Net PnL)", f"${net_combined_pnl:+.4f}", "价差损益 + 资金费")
 
-    # --- Section A.1: Institutional Risk Shields - Toxic Blacklist, Quarantine & Post-TP Lockout ---
+    # --- Section A.1: Institutional Risk Shields - Toxic Blacklist, Quarantine, Probation & Post-TP Lockout ---
     permanent_blacklist = arb_data.get("permanent_blacklist", [])
     quarantined_tokens = arb_data.get("quarantined_tokens", {})
     post_tp_lockout = arb_data.get("post_tp_lockout", {})
+    probationary_tokens = arb_data.get("probationary_tokens", {})
+    graduation_status = arb_data.get("graduation_status", {})
 
-    if permanent_blacklist or quarantined_tokens or post_tp_lockout:
-        total_intercepted = len(set(permanent_blacklist) | set(quarantined_tokens.keys()) | set(post_tp_lockout.keys()))
-        with st.expander(f"🛡️ **机构级量化风控拦截与熔断盾牌**：`{total_intercepted}` 个标的处于风控限制状态", expanded=True):
+    if permanent_blacklist or quarantined_tokens or post_tp_lockout or probationary_tokens:
+        total_intercepted = len(set(permanent_blacklist) | set(quarantined_tokens.keys()) | set(post_tp_lockout.keys()) | set(probationary_tokens.keys()))
+        with st.expander(f"🛡️ **机构级量化风控拦截、熔断与标的资质晋升**：`{total_intercepted}` 个标的处于风控限制或考察状态", expanded=True):
             st.caption(
-                "机构级六重风控盾牌实时防御：拦截历史累计严重亏损毒币（累计净亏 ≥ $30 终生拉黑）、"
-                "短时严重失血/连续止损标的（24h 物理隔离）、以及刚止盈标的（4h 防高位追高锁定）。"
+                "机构级风控与自进化资产池：拦截历史累计严重亏损毒币（累计净亏 ≥ $30 终生拉黑）、"
+                "短时严重失血/连续止损标的（24h 物理隔离）、刚止盈标的（4h 防高位追高锁定），"
+                "并配合「标的资质晋升算法」每 7 天定期对黑名单进行流动性体检（要求 24h成交量 ≥ $30M 且两所偏离 ≤ 0.5%），符合条件以 $200 探针仓位特赦试水！"
             )
 
             # 1. 永久拉黑毒币熔断区
             if permanent_blacklist:
-                st.markdown(f"##### 🚫 永久拉黑毒币熔断名单 (`{len(permanent_blacklist)}` 个代币已终生熔断)")
-                st.caption("以下标的历史累计净亏损突破 $30 红线（前期无保护旧仓或严重摩擦币），算法已实行终生一票否决，不再建仓：")
+                hd_col1, hd_col2 = st.columns([3, 1.2])
+                with hd_col1:
+                    st.markdown(f"##### 🚫 永久拉黑毒币熔断名单 (`{len(permanent_blacklist)}` 个代币已终生熔断)")
+                    st.caption("以下标的历史累计净亏损突破 $30 红线，算法已实行终生一票否决；若标的后续成长成熟，可通过资质体检获得特赦考察资格：")
+                with hd_col2:
+                    if st.button("🎓 立即执行资质体检", key=f"grad_audit_{bot_name}", use_container_width=True, help="立即向后台轮换引擎发送指令，全面体检黑名单中毒币的24h成交量（要求≥$30M）与标记价格偏离度（要求≤0.5%）。符合条件的币将获得特赦，以 $200 探针仓位进入考察期！"):
+                        if send_strategy_command(bot_name, {"action": "trigger_graduation_audit"}):
+                            st.success("已发送资质体检指令，正在后台扫描黑名单标的流动性与价格偏离度！")
+                            st.rerun()
+
                 b_cols = st.columns(min(len(permanent_blacklist), 4))
                 for i, b_tok in enumerate(permanent_blacklist):
                     with b_cols[i % len(b_cols)]:
@@ -252,10 +263,36 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                             f"</div>",
                             unsafe_allow_html=True
                         )
-                        if st.button(f"🕊️ 赦免解封 {b_tok}", key=f"unbl_{b_tok}_{bot_name}", use_container_width=True):
+                        if st.button(f"🕊️ 手动赦免 {b_tok}", key=f"unbl_{b_tok}_{bot_name}", use_container_width=True):
                             if send_strategy_command(bot_name, {"action": "unblacklist_token", "token": b_tok}):
                                 st.success(f"已发送解封指令，{b_tok} 已移出永久黑名单！")
                                 st.rerun()
+
+            # 1b. 特赦考察期名单
+            if probationary_tokens:
+                st.markdown(f"##### 🟡 特赦考察期试水名单 (`{len(probationary_tokens)}` 个标的流动性成熟，试水中)")
+                st.caption(
+                    "以下标的已通过流动性体检（24h成交量 ≥ $30M 且两所价差偏离 ≤ 0.5%），当前处于特赦考察期。"
+                    "算法采用安全探针仓位（$200 / 1x 免杠杆）试水；若首战实现盈利或触发止盈，正式晋升回归常规资产池；若再次净亏损，则退回永久黑名单。"
+                )
+                pr_rows = []
+                for pr_tok, pr_info in probationary_tokens.items():
+                    bn_v = pr_info.get("bn_vol", 0.0) / 1e6
+                    hl_v = pr_info.get("hl_vol", 0.0) / 1e6
+                    tot_v = bn_v + hl_v
+                    div_pct = pr_info.get("divergence", 0.0)
+                    probe_done = pr_info.get("probe_executed", False)
+                    status_str = "🔄 正在持仓试水" if probe_done else "⏳ 等待盘口信号入场"
+                    pr_rows.append({
+                        "代币": pr_tok,
+                        "考察状态": status_str,
+                        "探针仓位": f"${pr_info.get('probe_size', 200.0):,.0f} (1x免杠杆)",
+                        "24h 合计成交量": f"${tot_v:.1f}M (币安 ${bn_v:.1f}M / HL ${hl_v:.1f}M)",
+                        "两所价格偏离度": f"{div_pct:.3%}",
+                        "特赦原因": pr_info.get("reason", "流动性体检达标"),
+                    })
+                if pr_rows:
+                    st.dataframe(pd.DataFrame(pr_rows), use_container_width=True, hide_index=True)
 
             # 2. 动态隔离区
             if quarantined_tokens:
@@ -446,6 +483,7 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                     "curr_basis": curr_basis,
                     "payback_hours": float(p.get("payback_hours", 0.0)),
                     "tier": int(p.get("tier", 2)),
+                    "is_probationary_probe": bool(p.get("is_probationary_probe", False)),
                 })
 
                 tier_num = int(p.get("tier", 2))
@@ -487,7 +525,10 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                 pos_card_items[-1]["breakeven_active"] = breakeven_active
 
                 # Compact Table Row: compact columns without excessive text bloat
-                if long_lev == 1 and short_lev == 1:
+                is_probe = bool(p.get("is_probationary_probe", False))
+                if is_probe:
+                    lev_tag = "🔬 考察探针1x"
+                elif long_lev == 1 and short_lev == 1:
                     lev_tag = "🛡️ 1x免杠杆"
                 elif long_lev == short_lev:
                     lev_tag = f"⚡ {long_lev}x"
@@ -521,7 +562,12 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                         # Top bar of the card
                         c_hd1, c_hd2, c_hd3 = st.columns([1.8, 2.0, 1.2])
                         with c_hd1:
-                            if item['long_lev'] == 1 and item['short_lev'] == 1:
+                            if item.get('is_probationary_probe'):
+                                lev_badge_html = (
+                                    f"<span style='font-size:12px; background:#78350f; border:1px solid #f59e0b; padding:3px 8px; border-radius:4px; color:#fde68a; font-weight:600;'>"
+                                    f"🔬 特赦考察试水单 (探针 $200 / 1x免杠杆)</span>"
+                                )
+                            elif item['long_lev'] == 1 and item['short_lev'] == 1:
                                 lev_badge_html = (
                                     f"<span style='font-size:12px; background:#064e3b; border:1px solid #059669; padding:3px 8px; border-radius:4px; color:#34d399; font-weight:600;'>"
                                     f"🛡️ 1x 全额免杠杆安全对冲 (零爆仓风险)</span>"
