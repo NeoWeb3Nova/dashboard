@@ -17,6 +17,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+from frontend.components.market_links import get_official_market_url, get_token_research_urls
 from frontend.components.timezone_utils import (
     format_timestamp,
     get_current_timezone,
@@ -219,6 +220,9 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                 real_margin = single_long_margin + single_short_margin
                 token_sym = p.get('token', '')
                 coin_amt_str = f"{pos_size / long_p:,.0f} {token_sym}" if long_p > 0 else "N/A"
+                long_market_url = get_official_market_url(long_ex, token_sym)
+                short_market_url = get_official_market_url(short_ex, token_sym)
+                research_urls = get_token_research_urls(token_sym)
 
                 unrealized_pnl = float(p.get('unrealized_trading_pnl', 0))
                 funding_inc = float(p.get('funding_income', 0))
@@ -240,6 +244,12 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                     "short_ex": short_ex,
                     "c1_abbr": c1_abbr,
                     "c2_abbr": c2_abbr,
+                    "long_market_url": long_market_url,
+                    "short_market_url": short_market_url,
+                    "tradingview_url": research_urls["tradingview"],
+                    "coinglass_url": research_urls["coinglass"],
+                    "coingecko_url": research_urls["coingecko"],
+                    "coinmarketcap_url": research_urls["coinmarketcap"],
                     "long_lev": long_lev,
                     "short_lev": short_lev,
                     "long_p": long_p,
@@ -296,6 +306,9 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                 pos_table_rows.append({
                     "标的 (杠杆)": f"{token_sym} ({lev_tag})",
                     "对冲路径": f"🟢{c1_abbr}(多) ⇄ 🔴{c2_abbr}(空)",
+                    "多头官方行情": long_market_url,
+                    "空头官方行情": short_market_url,
+                    "代币官网与资料": research_urls["coinglass"],
                     f"开仓时间 ({tz_label})": open_time_str,
                     "实缴本金": f"${real_margin:,.2f}",
                     "单边货值": f"${pos_size:,.2f}",
@@ -323,6 +336,21 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                                 unsafe_allow_html=True
                             )
                             st.caption(f"🧭 **对冲配对**: `🟢 {item['long_ex']} (多)` ⇄ `🔴 {item['short_ex']} (空)`")
+
+                            # Official Exchange & Research Web Links
+                            st.markdown(
+                                f"<div style='margin-top:6px; margin-bottom:4px; display:flex; flex-wrap:wrap; gap:6px; font-size:12px;'>"
+                                f"<a href='{item['long_market_url']}' target='_blank' style='text-decoration:none; background:#064e3b; color:#34d399; padding:3px 8px; border-radius:4px; border:1px solid #059669; font-weight:600;'>"
+                                f"🟢 {item['c1_abbr']} 官方K线/盘口 ↗</a>"
+                                f"<a href='{item['short_market_url']}' target='_blank' style='text-decoration:none; background:#7f1d1d; color:#f87171; padding:3px 8px; border-radius:4px; border:1px solid #dc2626; font-weight:600;'>"
+                                f"🔴 {item['c2_abbr']} 官方K线/盘口 ↗</a>"
+                                f"<a href='{item['tradingview_url']}' target='_blank' style='text-decoration:none; background:#1e293b; color:#93c5fd; padding:3px 8px; border-radius:4px; border:1px solid #3b82f6; font-weight:500;'>"
+                                f"📊 TradingView K线 ↗</a>"
+                                f"<a href='{item['coinglass_url']}' target='_blank' style='text-decoration:none; background:#1e293b; color:#fbbf24; padding:3px 8px; border-radius:4px; border:1px solid #f59e0b; font-weight:500;'>"
+                                f"🌐 代币官网/背景 ↗</a>"
+                                f"</div>",
+                                unsafe_allow_html=True
+                            )
                         with c_hd2:
                             st.markdown(f"⏱️ **开仓时刻**: `{item['open_time_str']}` *({tz_label})* &nbsp;&nbsp;|&nbsp;&nbsp; ⏳ **时长**: `{item['dur_str']}`")
                             st.markdown(f"🕒 **结算点**: `{item['countdown_str']}` &nbsp;&nbsp;|&nbsp;&nbsp; 🛡️ **强平盾**: `{item['health_badge']}`")
@@ -355,16 +383,16 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                         with col_b:
                             st.markdown("##### 🛡️ 双腿盘口与强平防线")
                             st.markdown(f"""
-                            - 🟢 **多头腿 (`{item['long_ex']}`)**:
+                            - 🟢 **多头腿 (`{item['long_ex']}`)** <a href='{item['long_market_url']}' target='_blank' style='color:#34d399; font-size:12px; font-weight:600; text-decoration:none;'>[打开官方K线/盘口 ↗]</a>:
                               - 买入: `${item['long_p']:.4f}` → 现价: `${item['curr_long_p']:.4f}` | 单腿损益: **`${item['long_leg_pnl']:+.2f}`**
                               - 预估强平: `${item['liq_long']:.4f}` *(安全垫: `+{item['dist_long']:.1%}`)*
-                            - 🔴 **空头腿 (`{item['short_ex']}`)**:
+                            - 🔴 **空头腿 (`{item['short_ex']}`)** <a href='{item['short_market_url']}' target='_blank' style='color:#f87171; font-size:12px; font-weight:600; text-decoration:none;'>[打开官方K线/盘口 ↗]</a>:
                               - 卖出: `${item['short_p']:.4f}` → 现价: `${item['curr_short_p']:.4f}` | 单腿损益: **`${item['short_leg_pnl']:+.2f}`**
                               - 预估强平: `${item['liq_short']:.4f}` *(安全垫: `+{item['dist_short']:.1%}`)*
                             - ⚖️ **双腿价差与滑点对冲损益**:
                               - 开仓两所价差: `{item['open_basis']:+.3f}%` → 当前平仓价差: `{item['curr_basis']:+.3f}%`
                               - 两腿对冲价差净损益: **`${item['unrealized_pnl']:+.4f}`** *(多头 ${item['long_leg_pnl']:+.2f} + 空头 ${item['short_leg_pnl']:+.2f})*
-                            """)
+                            """, unsafe_allow_html=True)
 
                         with col_c:
                             st.markdown("##### 📈 实时损益与费率利息")
@@ -380,7 +408,12 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                             - ⏰ **下期资金费结算**: 约 `{min(item['next_f1'], item['next_f2'])}m` 后到账
                             """)
             else:
-                st.dataframe(pd.DataFrame(pos_table_rows), use_container_width=True, hide_index=True)
+                pos_col_cfg = {
+                    "多头官方行情": st.column_config.LinkColumn("多头官方行情", display_text="🟢 官方行情 ↗"),
+                    "空头官方行情": st.column_config.LinkColumn("空头官方行情", display_text="🔴 官方行情 ↗"),
+                    "代币官网与资料": st.column_config.LinkColumn("代币官网与资料", display_text="🌐 官网资料 ↗"),
+                }
+                st.dataframe(pd.DataFrame(pos_table_rows), use_container_width=True, hide_index=True, column_config=pos_col_cfg)
 
             with st.expander("🔬 财务核算速递：什么是盘口浮盈亏？为什么刚开仓往往微负？", expanded=False):
                 st.markdown("""
@@ -474,18 +507,32 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                 open_dt = format_timestamp(t.get("open_timestamp", 0), active_tz)
                 dur_sec = max(0, int(t.get("close_timestamp", 0)) - int(t.get("open_timestamp", 0))) if t.get("close_timestamp") and t.get("open_timestamp") else 0
                 dur_str = f"{dur_sec // 3600}h {(dur_sec % 3600) // 60}m" if dur_sec > 0 else "N/A"
+                tok = t.get("token", "")
+                c1_name = t.get("connector_1", "binance_perpetual")
+                c2_name = t.get("connector_2", "hyperliquid_perpetual")
+                c1_url = get_official_market_url(c1_name, tok)
+                c2_url = get_official_market_url(c2_name, tok)
+                t_res = get_token_research_urls(tok)
                 closed_rows.append({
                     f"平仓时间 ({tz_label})": close_dt,
                     f"开仓时间 ({tz_label})": open_dt,
                     "持仓时长": dur_str,
-                    "标的币种": t.get("token"),
-                    "套利交易所": f"{t.get('connector_1')} & {t.get('connector_2')}",
+                    "标的币种": tok,
+                    "官方K线 (腿1)": c1_url,
+                    "官方K线 (腿2)": c2_url,
+                    "代币资料/官网": t_res["coinglass"],
+                    "套利交易所": f"{c1_name} & {c2_name}",
                     "平仓原因": t.get("close_reason", "Completed"),
                     "价差损益": f"${t.get('trading_pnl', 0):+.4f}",
                     "资金费净利息": f"${t.get('funding_pnl', 0):+.4f}",
                     "最终实现净利润 (Net PnL)": f"${t.get('total_net_pnl', 0):+.4f}",
                 })
-            st.dataframe(pd.DataFrame(closed_rows), use_container_width=True, hide_index=True)
+            closed_col_cfg = {
+                "官方K线 (腿1)": st.column_config.LinkColumn("官方K线 (腿1)", display_text="📈 腿1K线 ↗"),
+                "官方K线 (腿2)": st.column_config.LinkColumn("官方K线 (腿2)", display_text="📈 腿2K线 ↗"),
+                "代币资料/官网": st.column_config.LinkColumn("代币资料/官网", display_text="🌐 官网资料 ↗"),
+            }
+            st.dataframe(pd.DataFrame(closed_rows), use_container_width=True, hide_index=True, column_config=closed_col_cfg)
         else:
             st.info("ℹ️ 暂无历史平仓记录。")
 
@@ -495,12 +542,19 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
         if market_comp:
             rates_rows = []
             for m in market_comp:
+                tok = m.get("token", "")
                 daily_diff = m.get('daily_rate_diff_pct', 0)
                 apr_val = daily_diff * 365
                 apr_str = f"{apr_val:+.2f}%" if abs(apr_val) < 10000 else f"{apr_val:+.2e}%"
                 status_str = "✅ 已达标 (开仓)" if daily_diff >= thresh_pct else f"⏳ 观望中 (差 {(thresh_pct - daily_diff):.4f}%)"
+                bn_url = get_official_market_url("binance_perpetual", tok)
+                hl_url = get_official_market_url("hyperliquid_perpetual", tok)
+                res_url = get_token_research_urls(tok)["coinglass"]
                 row = {
-                    "监控币种": m.get("token"),
+                    "监控币种": tok,
+                    "币安官方K线": bn_url,
+                    "HL官方盘口": hl_url,
+                    "代币官网与资料": res_url,
                     "推荐套利组合 (Path)": m.get("best_path", "N/A"),
                     "折算日化利差 (Daily Diff)": f"{daily_diff:+.4f}% / 天" if abs(daily_diff) < 1000 else f"{daily_diff:+.2e}% / 天",
                     "折算年化利差 (APR)": apr_str,
@@ -512,7 +566,12 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                         v_str = f"{v:+.4f}%" if abs(v) < 1000 else f"{v:+.2e}%"
                         row[f"{c_title} 费率 (日化)"] = v_str
                 rates_rows.append(row)
-            st.dataframe(pd.DataFrame(rates_rows), use_container_width=True, hide_index=True)
+            rates_col_cfg = {
+                "币安官方K线": st.column_config.LinkColumn("币安官方K线", display_text="🟡 币安K线 ↗"),
+                "HL官方盘口": st.column_config.LinkColumn("HL官方盘口", display_text="🟢 HL盘口 ↗"),
+                "代币官网与资料": st.column_config.LinkColumn("代币官网与资料", display_text="🌐 官网资料 ↗"),
+            }
+            st.dataframe(pd.DataFrame(rates_rows), use_container_width=True, hide_index=True, column_config=rates_col_cfg)
 
             with st.expander("📡 查看全市场 200+ 标的实时高利差机会雷达 (Market Radar)", expanded=False):
                 try:
@@ -521,9 +580,16 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                         st.caption("ℹ️ 当前全市场正在爆发高利差的潜力标的排行榜（如果当前机器人监控币种利差较低，可参考此列表挑选并切换标的）：")
                         radar_rows = []
                         for i, o in enumerate(all_opps[:15], 1):
+                            tok = o["coin"]
+                            bn_url = get_official_market_url("binance_perpetual", tok)
+                            hl_url = get_official_market_url("hyperliquid_perpetual", tok)
+                            res_url = get_token_research_urls(tok)["coinglass"]
                             radar_rows.append({
                                 "全网排名": f"#{i}",
-                                "标的币种": o["coin"],
+                                "标的币种": tok,
+                                "币安K线": bn_url,
+                                "HL盘口": hl_url,
+                                "官网资料": res_url,
                                 "折算年化 (APR)": f"{o['apr']:+.2f}%",
                                 "折算日化利差": f"{o['daily_diff_pct']:+.4f}% / 天",
                                 "流动性评级": o.get("liquidity_badge", "🟡 适中"),
@@ -533,7 +599,12 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                                 "推荐套利组合方向": o["best_path"],
                                 "现价 ($)": f"${o['price']:.4f}" if o['price'] < 10 else f"${o['price']:.2f}",
                             })
-                        st.dataframe(pd.DataFrame(radar_rows), use_container_width=True, hide_index=True)
+                        radar_col_cfg = {
+                            "币安K线": st.column_config.LinkColumn("币安K线", display_text="🟡 币安 ↗"),
+                            "HL盘口": st.column_config.LinkColumn("HL盘口", display_text="🟢 HL ↗"),
+                            "官网资料": st.column_config.LinkColumn("官网资料", display_text="🌐 资料 ↗"),
+                        }
+                        st.dataframe(pd.DataFrame(radar_rows), use_container_width=True, hide_index=True, column_config=radar_col_cfg)
                 except Exception as e:
                     st.info(f"全市场雷达加载中: {e}")
         else:
