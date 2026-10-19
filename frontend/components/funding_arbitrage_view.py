@@ -143,20 +143,61 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
     single_margin = real_margin_total / 2.0
     roe_apr = (projected_daily_usd * 365.0 / real_margin_total * 100.0) if real_margin_total > 0 else 0.0
 
+    # --- Dynamic Adaptive Leverage Detection ---
+    active_levs = []
+    for p in active_pos:
+        l_lev = int(p.get("long_leverage") or p.get("leverage") or global_leverage)
+        s_lev = int(p.get("short_leverage") or p.get("leverage") or global_leverage)
+        active_levs.extend([l_lev, s_lev])
+    unique_levs = sorted(list(set(active_levs))) if active_levs else []
+
+    if not active_pos:
+        m1_delta = f"当前空仓待命中 (策略预设 {global_leverage}x 上限)"
+        m2_delta = f"单边对冲 $0.00 (无合约风险敞口)"
+        m1_help = f"当前无活跃套利持仓，未占用交易所保证金。策略预设最大目标杠杆为 {global_leverage}x。"
+        m2_help = "当前无活跃套利持仓，双边合约总货值为 $0.00。"
+    elif len(unique_levs) == 1 and unique_levs[0] == 1:
+        # All positions 1x: Zero leverage / Spot equivalent safe hedging
+        m1_delta = f"🛡️ 1x 全额免杠杆 (多空各押 ${single_margin:,.2f})"
+        m2_delta = f"🛡️ 1:1 现货级对冲无放大 (单边 ${total_capital:,.2f})"
+        m1_help = f"自适应安全模式：当前全部活跃持仓均采用 1x 全额免杠杆对冲（零强平爆仓风险），多空两所各出资 ${single_margin:,.2f} 全额质押。"
+        m2_help = f"全部持仓采用 1x 免杠杆安全对冲，合约名义总货值严格等于实缴总本金（${real_margin_total:,.2f}），没有任何杠杆乘数放大。"
+    elif len(unique_levs) == 1 and unique_levs[0] > 1:
+        # All positions share the exact same leverage (e.g. 2x, 3x)
+        lev = unique_levs[0]
+        m1_delta = f"两所各押 ${single_margin:,.2f} ({lev}x 杠杆实缴)"
+        m2_delta = f"总本金×{lev}x 放大 (单边对冲 ${total_capital:,.2f})"
+        m1_help = f"当前所有活跃持仓均采用统一的 {lev}x 杠杆质押，多空两所各自出资一半（${single_margin:,.2f}）。"
+        m2_help = f"双边合计控制的合约总名义资产 = 多头货值 (${total_capital:,.2f}) + 空头货值 (${total_capital:,.2f}) = 实缴总本金 (${real_margin_total:,.2f}) × {lev}x 杠杆；单边对冲货值占总本金的 {total_capital/real_margin_total if real_margin_total > 0 else 1.5:.1f}x。"
+    else:
+        # Mixed leverages (e.g. some 1x, some 2x, some 3x)
+        lev_tags = "/".join(f"{l}x" for l in unique_levs)
+        has_1x = 1 in unique_levs
+        if has_1x:
+            m1_delta = f"动态加权 {effective_leverage:.1f}x (含 1x免杠杆仓)"
+            m2_delta = f"总本金×{effective_leverage:.1f}x 综合放大 (单边 ${total_capital:,.2f})"
+            m1_help = f"自适应动态杠杆生效中：当前持仓组合包含 {lev_tags} 多种杠杆配置。小额资金标的自动降为 1x 免杠杆以消除爆仓风险，大额资金采用目标杠杆增效，全组合综合加权有效杠杆为 {effective_leverage:.1f}x（多空两所各押 ${single_margin:,.2f}）。"
+            m2_help = f"双边合约总名义资产 = 实缴总本金 (${real_margin_total:,.2f}) × 综合加权 {effective_leverage:.1f}x 杠杆放大（包含 1x 免杠杆安全仓与加速仓）；单边对冲敞口为 ${total_capital:,.2f}。"
+        else:
+            m1_delta = f"动态加权 {effective_leverage:.1f}x (混合 {lev_tags})"
+            m2_delta = f"总本金×{effective_leverage:.1f}x 综合放大 (单边 ${total_capital:,.2f})"
+            m1_help = f"当前持仓组合包含 {lev_tags} 多种杠杆，全组合综合加权有效杠杆为 {effective_leverage:.1f}x（多空两所各押 ${single_margin:,.2f}）。"
+            m2_help = f"双边合约总名义资产 = 实缴总本金 (${real_margin_total:,.2f}) × 综合加权 {effective_leverage:.1f}x 杠杆放大；单边对冲敞口为 ${total_capital:,.2f}。"
+
     col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns(5)
     with col_m1:
         st.metric(
             "💼 真实实缴本金 (总保证金)",
             f"${real_margin_total:,.2f}",
-            f"两所各押 ${single_margin:,.2f} ({effective_leverage:.1f}x 杠杆)",
-            help=f"双边实际在交易所质押的 USDT 保证金总额 = 多头保证金 + 空头保证金（两所各出资 ${single_margin:,.2f}，按 {effective_leverage:.1f}x 杠杆质押）"
+            m1_delta,
+            help=m1_help
         )
     with col_m2:
         st.metric(
             "🎯 双边合约总货值 (Gross)",
             f"${gross_capital:,.2f}",
-            f"总本金×{effective_leverage:.1f}x 放大 (单边 ${total_capital:,.2f})",
-            help=f"双边合计控制的合约总名义资产 = 多头货值 (${total_capital:,.2f}) + 空头货值 (${total_capital:,.2f}) = 实缴总本金 (${real_margin_total:,.2f}) × {effective_leverage:.1f}x 杠杆放大；单边对冲敞口占总本金的 {total_capital/real_margin_total if real_margin_total>0 else 1.5:.1f}x"
+            m2_delta,
+            help=m2_help
         )
     with col_m3:
         st.metric("💰 累计已收资金费", f"${total_funding_income:+.4f}", "每小时 / 8小时结算到账")
@@ -347,7 +388,12 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                 pos_card_items[-1]["hourly_funding_usd"] = hourly_funding_usd
 
                 # Compact Table Row: compact columns without excessive text bloat
-                lev_tag = f"多{long_lev}x/空{short_lev}x" if long_lev != short_lev else f"多空{long_lev}x"
+                if long_lev == 1 and short_lev == 1:
+                    lev_tag = "🛡️ 1x免杠杆"
+                elif long_lev == short_lev:
+                    lev_tag = f"⚡ {long_lev}x"
+                else:
+                    lev_tag = f"⚡ 多{long_lev}x/空{short_lev}x"
                 pos_table_rows.append({
                     "标的 (杠杆)": f"{token_sym} ({lev_tag})",
                     "对冲路径": f"🟢{c1_abbr}(多) ⇄ 🔴{c2_abbr}(空)",
@@ -425,13 +471,23 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                         col_a, col_b, col_c = st.columns([1.1, 1.4, 1.1])
                         with col_a:
                             st.markdown("##### 💼 资金规模与开仓杠杆")
+                            if item['long_lev'] == 1 and item['short_lev'] == 1:
+                                card_gross_sub = f"*(1:1 现货级免杠杆，实缴本金 `${item['real_margin']:,.2f}` 全额对冲)*"
+                                card_lev_desc = f"🛡️ **1x 全额免杠杆** *(小额资金安全模式，零强平爆仓风险)*"
+                            elif item['long_lev'] == item['short_lev']:
+                                card_gross_sub = f"*(实缴本金 `${item['real_margin']:,.2f}` × {item['long_lev']}x 杠杆放大)*"
+                                card_lev_desc = f"⚡ **多空统一 `{item['long_lev']}x` 杠杆** *(大额资金增效模式)*"
+                            else:
+                                card_gross_sub = f"*(实缴本金 `${item['real_margin']:,.2f}` 差异杠杆放大)*"
+                                card_lev_desc = f"⚡ **做多 `{item['long_lev']}x` | 做空 `{item['short_lev']}x`**"
+
                             st.markdown(f"""
                             - **实缴本金 (双边保证金)**: **`${item['real_margin']:,.2f}`**
                               - *(多头保证金 `${item['single_long_margin']:,.2f}` + 空头保证金 `${item['single_short_margin']:,.2f}`)*
-                            - **双边合约总货值**: **`${item['pos_size'] * 2:,.2f}`** *(实缴本金 `${item['real_margin']:,.2f}` × {item['long_lev']}x 杠杆)*
+                            - **双边合约总货值**: **`${item['pos_size'] * 2:,.2f}`** {card_gross_sub}
                             - **单边对冲货值**: **`${item['pos_size']:,.2f}`** *(多空两腿各持仓 `${item['pos_size']:,.2f}`)*
                             - **持币对冲数量**: `{item['coin_amt_str']}` *(双向等量持币)*
-                            - **开仓杠杆倍数**: **做多 `{item['long_lev']}x` | 做空 `{item['short_lev']}x`**
+                            - **开仓杠杆状态**: {card_lev_desc}
                             """)
 
                         with col_b:
