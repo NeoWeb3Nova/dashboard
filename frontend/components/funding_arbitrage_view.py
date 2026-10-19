@@ -17,6 +17,13 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+from frontend.components.timezone_utils import (
+    format_timestamp,
+    get_current_timezone,
+    get_timezone_label,
+    render_timezone_selector,
+)
+
 
 def render_funding_arbitrage_kpi_cards(arb_data, total_volume_traded, total_global_pnl_quote):
     """Render the 4 decoupled accounting KPI cards for Funding Rate Arbitrage bots."""
@@ -87,7 +94,15 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
     is_dry_run = arb_data.get("is_dry_run", True)
 
     mode_badge = "🟢 纸面预演 (Dry-Run)" if is_dry_run else "🔴 实盘交易 (Live)"
-    st.markdown(f"#### 💰 资金费率套利持仓与量化透视 `{mode_badge}`")
+
+    col_hdr_title, col_hdr_tz = st.columns([3.5, 1.5])
+    with col_hdr_title:
+        st.markdown(f"#### 💰 资金费率套利持仓与量化透视 `{mode_badge}`")
+    with col_hdr_tz:
+        active_tz, tz_label = render_timezone_selector(
+            key=f"tz_sel_{bot_name}",
+            label="🌐 显示时区"
+        )
 
     # --- Section A: Summary Key Performance Metrics ---
     total_capital = sum(float(p.get("position_size", 0)) for p in active_pos)
@@ -162,11 +177,20 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                 curr_short_p = curr_p2 if side == "BUY" else curr_p1
 
                 now_ts = time.time()
-                next_f1 = max(0, int(p.get("next_funding_1", 0) - now_ts)) // 60
-                next_f2 = max(0, int(p.get("next_funding_2", 0) - now_ts)) // 60
+                open_ts = p.get("open_timestamp")
+                if not open_ts:
+                    open_ts = now_ts - p.get("duration_seconds", 0)
+                open_time_str = format_timestamp(open_ts, active_tz)
+
+                next_f1_ts = p.get("next_funding_1", 0)
+                next_f2_ts = p.get("next_funding_2", 0)
+                next_f1 = max(0, int(next_f1_ts - now_ts)) // 60 if next_f1_ts > 0 else 0
+                next_f2 = max(0, int(next_f2_ts - now_ts)) // 60 if next_f2_ts > 0 else 0
+                f1_clock = format_timestamp(next_f1_ts, active_tz, "%H:%M") if next_f1_ts > 0 else "N/A"
+                f2_clock = format_timestamp(next_f2_ts, active_tz, "%H:%M") if next_f2_ts > 0 else "N/A"
                 c1_abbr = long_ex.split('_')[0].capitalize()
                 c2_abbr = short_ex.split('_')[0].capitalize()
-                countdown_str = f"{c1_abbr}: {next_f1}m | {c2_abbr}: {next_f2}m"
+                countdown_str = f"{c1_abbr}: {next_f1}m ({f1_clock}) | {c2_abbr}: {next_f2}m ({f2_clock})"
 
                 # Leverage handling
                 lev = int(p.get("leverage") or arb_data.get("leverage") or 3)
@@ -238,6 +262,7 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                     "net_pnl": net_pnl,
                     "net_pct": net_pct,
                     "dur_str": dur_str,
+                    "open_time_str": open_time_str,
                     "countdown_str": countdown_str,
                     "next_f1": next_f1,
                     "next_f2": next_f2,
@@ -271,6 +296,7 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                 pos_table_rows.append({
                     "标的 (杠杆)": f"{token_sym} ({lev_tag})",
                     "对冲路径": f"🟢{c1_abbr}(多) ⇄ 🔴{c2_abbr}(空)",
+                    f"开仓时间 ({tz_label})": open_time_str,
                     "实缴本金": f"${real_margin:,.2f}",
                     "单边货值": f"${pos_size:,.2f}",
                     "双边总货值": f"${pos_size * 2:,.2f}",
@@ -298,8 +324,8 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                             )
                             st.caption(f"🧭 **对冲配对**: `🟢 {item['long_ex']} (多)` ⇄ `🔴 {item['short_ex']} (空)`")
                         with c_hd2:
-                            st.markdown(f"⏱️ **持仓时长**: `{item['dur_str']}` &nbsp;&nbsp;|&nbsp;&nbsp; ⏳ **结算倒计时**: `{item['countdown_str']}`")
-                            st.markdown(f"🛡️ **强平安全盾**: `{item['health_badge']}` *(≤8% 自动市价防守平仓)*")
+                            st.markdown(f"⏱️ **开仓时刻**: `{item['open_time_str']}` *({tz_label})* &nbsp;&nbsp;|&nbsp;&nbsp; ⏳ **时长**: `{item['dur_str']}`")
+                            st.markdown(f"🕒 **结算点**: `{item['countdown_str']}` &nbsp;&nbsp;|&nbsp;&nbsp; 🛡️ **强平盾**: `{item['health_badge']}`")
                         with c_hd3:
                             pnl_color = "#00e676" if item['net_pnl'] >= 0 else "#ff5252"
                             st.markdown(
@@ -441,12 +467,17 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
 
     with tab_closed:
         if closed_trades:
-            st.caption("ℹ️ 达到止盈目标（Take Profit）或触发费率倒挂止损（Stop Loss）而平仓的历史记录")
+            st.caption(f"ℹ️ 达到止盈目标（Take Profit）或触发费率倒挂止损（Stop Loss）而平仓的历史记录（当前时间基准：{tz_label}）")
             closed_rows = []
             for t in closed_trades:
-                close_dt = pd.to_datetime(t.get("close_timestamp", 0), unit="s").strftime("%Y-%m-%d %H:%M:%S") if t.get("close_timestamp") else "N/A"
+                close_dt = format_timestamp(t.get("close_timestamp", 0), active_tz)
+                open_dt = format_timestamp(t.get("open_timestamp", 0), active_tz)
+                dur_sec = max(0, int(t.get("close_timestamp", 0)) - int(t.get("open_timestamp", 0))) if t.get("close_timestamp") and t.get("open_timestamp") else 0
+                dur_str = f"{dur_sec // 3600}h {(dur_sec % 3600) // 60}m" if dur_sec > 0 else "N/A"
                 closed_rows.append({
-                    "平仓时间": close_dt,
+                    f"平仓时间 ({tz_label})": close_dt,
+                    f"开仓时间 ({tz_label})": open_dt,
+                    "持仓时长": dur_str,
                     "标的币种": t.get("token"),
                     "套利交易所": f"{t.get('connector_1')} & {t.get('connector_2')}",
                     "平仓原因": t.get("close_reason", "Completed"),
@@ -460,7 +491,7 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
 
     with tab_rates:
         thresh_pct = arb_data.get("min_funding_rate_profitability_pct", 0.1)
-        st.caption(f"ℹ️ 策略后台实时扫描的各币种利差对比（当前设定开仓门槛：日化利差 ≥ {thresh_pct:+.4f}% / 天）")
+        st.caption(f"ℹ️ 策略后台实时扫描的各币种利差对比（当前设定开仓门槛：日化利差 ≥ {thresh_pct:+.4f}% / 天 | 当前显示时区：{tz_label}）")
         if market_comp:
             rates_rows = []
             for m in market_comp:

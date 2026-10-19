@@ -5,6 +5,7 @@ import pandas as pd
 import streamlit as st
 
 from frontend.components.funding_scanner import scan_cross_exchange_opportunities
+from frontend.components.timezone_utils import DEFAULT_TIMEZONE, TIMEZONE_CHOICES
 from frontend.st_utils import get_backend_api_client, initialize_st_page
 
 # Initialize the Streamlit page
@@ -315,6 +316,14 @@ with c_p3:
         help="开启后，策略将实时根据币种在两所的盘口挂单深度动态计算安全仓位（最高不超过目标名义价值），防止小币种吃穿盘口造成滑点损失。"
     )
 
+    selected_timezone = st.selectbox(
+        "🌐 策略参考基准时区 (Timezone)",
+        options=list(TIMEZONE_CHOICES.keys()),
+        index=0,  # "Asia/Shanghai" by default!
+        format_func=lambda k: TIMEZONE_CHOICES.get(k, k),
+        help="设置该套利机器人的参考基准时区（默认北京时间 / 上海时间 UTC+8）。持仓看板、成交记录与结算通知均以此基准显示。"
+    )
+
 st.write("---")
 
 # ==================== 4. Live YAML Config Generation & Preview ====================
@@ -323,6 +332,7 @@ st.subheader("📋 策略配置预览 (Live Configuration Preview)")
 config_dict = {
     "script_file_name": "v2_funding_rate_arb.py",
     "dry_run": bool(is_dry_run),
+    "timezone": selected_timezone,
     "connectors": [connector_1, connector_2],
     "tokens": final_tokens,
     "leverage": int(leverage),

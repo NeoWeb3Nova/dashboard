@@ -45,6 +45,7 @@ from frontend.components.funding_arbitrage_view import (
     render_funding_arbitrage_kpi_cards,
     render_funding_arbitrage_tables,
 )
+from frontend.components.timezone_utils import format_timestamp
 
 
 def stop_bot(bot_name):
@@ -401,7 +402,7 @@ def render_bot_card(bot_name):
 
                     if visible_error_logs:
                         for log in visible_error_logs[:50]:
-                            timestamp = log.get("timestamp", "")
+                            timestamp = format_timestamp(log.get("timestamp", ""))
                             message = log.get("msg", "")
                             logger_name = log.get("logger_name", "")
                             st.text(f"{timestamp} - {logger_name}: {message}")
@@ -443,7 +444,7 @@ def render_bot_card(bot_name):
 
                     if visible_gen_logs:
                         for log in visible_gen_logs[:50]:
-                            timestamp = pd.to_datetime(int(log.get("timestamp", 0)), unit="s")
+                            timestamp = format_timestamp(log.get("timestamp", 0))
                             message = log.get("msg", "")
                             logger_name = log.get("logger_name", "")
                             st.text(f"{timestamp} - {logger_name}: {message}")
