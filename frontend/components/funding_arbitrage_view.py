@@ -367,7 +367,16 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                     "open_basis": open_basis,
                     "curr_basis": curr_basis,
                     "payback_hours": float(p.get("payback_hours", 0.0)),
+                    "tier": int(p.get("tier", 2)),
                 })
+
+                tier_num = int(p.get("tier", 2))
+                if tier_num == 1:
+                    tier_badge_html = "<span style='font-size:11px; background:#1e1b4b; border:1px solid #4338ca; padding:2px 6px; border-radius:4px; color:#a5b4fc; font-weight:600;'>💎 T1 蓝筹</span>"
+                elif tier_num == 2:
+                    tier_badge_html = "<span style='font-size:11px; background:#14532d; border:1px solid #16a34a; padding:2px 6px; border-radius:4px; color:#86efac; font-weight:600;'>⭐ T2 主流</span>"
+                else:
+                    tier_badge_html = "<span style='font-size:11px; background:#451a03; border:1px solid #d97706; padding:2px 6px; border-radius:4px; color:#fde68a; font-weight:600;'>⚠️ T3 微盘</span>"
 
                 # Dynamic Breakeven calculation: how long to cover entry friction & net deficit
                 token_rate_daily = rate_diff_map.get(token_sym, 0.0) / 100.0
@@ -386,6 +395,7 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
 
                 pos_card_items[-1]["dynamic_payback_str"] = dynamic_payback_str
                 pos_card_items[-1]["hourly_funding_usd"] = hourly_funding_usd
+                pos_card_items[-1]["tier_badge_html"] = tier_badge_html
 
                 # Compact Table Row: compact columns without excessive text bloat
                 if long_lev == 1 and short_lev == 1:
@@ -395,7 +405,7 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                 else:
                     lev_tag = f"⚡ 多{long_lev}x/空{short_lev}x"
                 pos_table_rows.append({
-                    "标的 (杠杆)": f"{token_sym} ({lev_tag})",
+                    "标的 (分级/杠杆)": f"{token_sym} (T{tier_num} / {lev_tag})",
                     "对冲路径": f"🟢{c1_abbr}(多) ⇄ 🔴{c2_abbr}(空)",
                     "多头官方行情": long_market_url,
                     "空头官方行情": short_market_url,
@@ -431,7 +441,7 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                                     f"⚡ 杠杆: 多{item['long_lev']}x | 空{item['short_lev']}x (大额资金增效)</span>"
                                 )
                             st.markdown(
-                                f"#### 🪙 `{item['token']}` &nbsp; {lev_badge_html}",
+                                f"#### 🪙 `{item['token']}` &nbsp; {item.get('tier_badge_html', '')} &nbsp; {lev_badge_html}",
                                 unsafe_allow_html=True
                             )
 
