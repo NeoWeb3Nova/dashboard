@@ -643,13 +643,53 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                 )
 
             st.markdown("---")
-            c_title, c_sort, c_filter = st.columns([2.3, 1.4, 1.3])
-            with c_title:
-                st.markdown("##### 🔍 交易全过程细节与复盘归因分析 (Post-Mortem Review)")
-                st.caption(f"当前共 {len(analyzed_list)} 笔平仓对冲记录（默认按平仓时间倒序，最新在最前）")
-            with c_sort:
+            st.markdown("##### 🔍 交易全过程细节与复盘归因分析 (Post-Mortem Review)")
+
+            # 构建币种统计与下拉列表
+            token_counts = {}
+            for item in analyzed_list:
+                tok = item.get("token", "UNKNOWN")
+                token_counts[tok] = token_counts.get(tok, 0) + 1
+            sorted_tokens = sorted(token_counts.keys(), key=lambda t: (-token_counts[t], t))
+            token_options = [f"全部币种 ({len(analyzed_list)}笔)"] + [f"{tok} ({token_counts[tok]}笔)" for tok in sorted_tokens]
+
+            # 4 栏全功能量化复盘筛选控制台
+            f_col_tok, f_col_time, f_col_res, f_col_sort = st.columns([1.3, 1.3, 1.1, 1.3])
+            with f_col_tok:
+                selected_tok_opt = st.selectbox(
+                    "🪙 标的币种筛选",
+                    token_options,
+                    key=f"filter_token_{bot_name}",
+                    help="仅查看指定币种的历史平仓成交记录"
+                )
+            with f_col_time:
+                time_range_opt = st.selectbox(
+                    "🕒 平仓时段跨度",
+                    [
+                        "全部历史时段",
+                        "过去 6 小时内",
+                        "过去 12 小时内",
+                        "过去 24 小时内",
+                        "过去 3 天内",
+                        "过去 7 天内",
+                    ],
+                    key=f"filter_timerange_{bot_name}",
+                    help="按平仓发生的时间跨度过滤"
+                )
+            with f_col_res:
+                filter_res_opt = st.selectbox(
+                    "🎯 盈亏定性筛选",
+                    [
+                        f"全部盈亏 ({len(analyzed_list)})",
+                        f"🟢 仅看盈利单 ({summary_info['win_count']})",
+                        f"🔴 仅看止损/亏损单 ({summary_info['loss_count']})"
+                    ],
+                    key=f"filter_res_{bot_name}",
+                    help="按盈亏结果筛选交易记录"
+                )
+            with f_col_sort:
                 sort_opt = st.selectbox(
-                    "排序方式",
+                    "🔃 记录排序方式",
                     [
                         "🕒 平仓时间 (最新在前)",
                         "🕒 平仓时间 (最早在前)",
@@ -660,40 +700,69 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                     key=f"sort_closed_{bot_name}",
                     help="切换历史平仓成交排序方式，默认按平仓时间倒序"
                 )
-            with c_filter:
-                filter_opt = st.selectbox(
-                    "结果筛选",
-                    [
-                        f"全部交易 ({len(analyzed_list)})",
-                        f"🟢 仅看盈利单 ({summary_info['win_count']})",
-                        f"🔴 仅看止损/亏损单 ({summary_info['loss_count']})"
-                    ],
-                    key=f"filter_closed_{bot_name}",
-                    help="按盈亏结果筛选交易记录"
-                )
 
-            # 执行排序
+            # --- 1. 执行多维筛选过滤 ---
+            filtered_list = analyzed_list[:]
+
+            # 标的币种过滤
+            if "全部币种" not in selected_tok_opt:
+                target_tok = selected_tok_opt.split(" ")[0].strip()
+                filtered_list = [x for x in filtered_list if x.get("token") == target_tok]
+
+            # 平仓时段跨度过滤
+            if "全部历史时段" not in time_range_opt:
+                import time as _py_time
+                now_sec = _py_time.time()
+                time_window_map = {
+                    "过去 6 小时内": 6 * 3600,
+                    "过去 12 小时内": 12 * 3600,
+                    "过去 24 小时内": 24 * 3600,
+                    "过去 3 天内": 3 * 86400,
+                    "过去 7 天内": 7 * 86400,
+                }
+                max_age_sec = time_window_map.get(time_range_opt, 86400 * 365)
+                # 以当前时间或最新成交时间中较大者作为时间锚点（防止本地时钟偏移影响过滤）
+                max_trade_ts = max((x.get("close_ts", 0) for x in analyzed_list), default=now_sec)
+                anchor_now = max(now_sec, max_trade_ts)
+                filtered_list = [x for x in filtered_list if (anchor_now - x.get("close_ts", 0)) <= max_age_sec]
+
+            # 盈亏定性过滤
+            if "仅看盈利单" in filter_res_opt:
+                filtered_list = [x for x in filtered_list if x.get("is_win", False)]
+            elif "仅看止损" in filter_res_opt:
+                filtered_list = [x for x in filtered_list if not x.get("is_win", False)]
+
+            # --- 2. 执行排序 ---
             if "平仓时间 (最新在前)" in sort_opt:
-                display_list = sorted(analyzed_list, key=lambda x: x.get("close_ts", 0), reverse=True)
+                display_list = sorted(filtered_list, key=lambda x: x.get("close_ts", 0), reverse=True)
             elif "平仓时间 (最早在前)" in sort_opt:
-                display_list = sorted(analyzed_list, key=lambda x: x.get("close_ts", 0), reverse=False)
+                display_list = sorted(filtered_list, key=lambda x: x.get("close_ts", 0), reverse=False)
             elif "最终净利 (从高到低)" in sort_opt:
-                display_list = sorted(analyzed_list, key=lambda x: x.get("total_net_pnl", 0.0), reverse=True)
+                display_list = sorted(filtered_list, key=lambda x: x.get("total_net_pnl", 0.0), reverse=True)
             elif "最终净利 (从低到高)" in sort_opt:
-                display_list = sorted(analyzed_list, key=lambda x: x.get("total_net_pnl", 0.0), reverse=False)
+                display_list = sorted(filtered_list, key=lambda x: x.get("total_net_pnl", 0.0), reverse=False)
             elif "持仓历时 (从长到短)" in sort_opt:
-                display_list = sorted(analyzed_list, key=lambda x: x.get("dur_sec", 0), reverse=True)
+                display_list = sorted(filtered_list, key=lambda x: x.get("dur_sec", 0), reverse=True)
             else:
-                display_list = sorted(analyzed_list, key=lambda x: x.get("close_ts", 0), reverse=True)
+                display_list = sorted(filtered_list, key=lambda x: x.get("close_ts", 0), reverse=True)
 
-            # 执行筛选
-            if "仅看盈利单" in filter_opt:
-                display_list = [x for x in display_list if x.get("is_win", False)]
-            elif "仅看止损" in filter_opt:
-                display_list = [x for x in display_list if not x.get("is_win", False)]
+            # --- 3. 动态展示筛选后子集统计透视 ---
+            if len(display_list) < len(analyzed_list):
+                sub_pnl = sum(x.get("total_net_pnl", 0.0) for x in display_list)
+                sub_funding = sum(x.get("funding_pnl", 0.0) for x in display_list)
+                sub_trading = sum(x.get("trading_pnl", 0.0) for x in display_list)
+                sub_wins = sum(1 for x in display_list if x.get("is_win", False))
+                sub_wr = (sub_wins / len(display_list) * 100.0) if display_list else 0.0
+                st.info(
+                    f"🎯 **专项筛选透视已生效**：匹配 **`{len(display_list)}`** 笔平仓成交（全部 {len(analyzed_list)} 笔） ｜ "
+                    f"子集累计净利：**`{sub_pnl:+.4f} USD`** (资金费利息 `{sub_funding:+.4f}` / 价差摩擦 `{sub_trading:+.4f}`) ｜ "
+                    f"子集胜率：**`{sub_wr:.1f}%`** (`{sub_wins}`胜 `{len(display_list)-sub_wins}`负)"
+                )
+            else:
+                st.caption(f"当前共显示全部 **{len(display_list)}** 笔历史平仓记录（默认按平仓时间倒序置顶）")
 
             if not display_list:
-                st.info("ℹ️ 当前筛选条件下暂无平仓记录。")
+                st.warning("⚠️ 当前筛选组合下暂无匹配的平仓成交记录，请重置或放宽筛选条件。")
 
             for idx, item in enumerate(display_list):
                 icon = "🟢" if item["is_win"] else "🔴"
