@@ -55,8 +55,9 @@ def get_official_market_url(connector_name: str, token: str) -> str:
 def get_token_research_urls(token: str) -> Dict[str, str]:
     """
     Generate authoritative research links for a token:
-    - TradingView Live K-Line Chart
-    - CoinGlass Derivatives & Funding History
+    - TradingView Live K-Line Chart (Direct Binance Perpetual)
+    - CoinGlass Derivatives & Funding History (Direct Binance Cleared Contract)
+    - Binance Official Contract Spec & Project Verification (About Token Tab)
     - CoinGecko Project Website, Whitepaper & Info
     - CoinMarketCap Overview
     """
@@ -64,6 +65,8 @@ def get_token_research_urls(token: str) -> Dict[str, str]:
     return {
         "tradingview": f"https://www.tradingview.com/chart/?symbol=BINANCE:{token_clean}USDT.P",
         "coinglass": f"https://www.coinglass.com/tv/Binance_{token_clean}USDT",
+        "binance_info": f"https://www.binance.com/zh-CN/futures/{token_clean}USDT",
         "coingecko": f"https://www.coingecko.com/zh/search_queries?query={token_clean}",
         "coinmarketcap": f"https://coinmarketcap.com/search/?q={token_clean}",
     }
+
