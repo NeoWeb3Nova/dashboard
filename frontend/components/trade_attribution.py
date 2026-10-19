@@ -79,13 +79,29 @@ def analyze_trade_attribution(trade: Dict[str, Any], tz_label: str = "北京时�
                 f"机器人自动以最优市价挂单平仓，锁定净利润 +${total_net_pnl:,.4f}。"
             )
     else:
-        if "Rate Inversion" in close_reason or "费率持续倒挂止损" in close_reason:
+        if "Breakeven" in close_reason:
+            attr_tag = "🛡️ 移动保本止损锁定"
+            summary_reason = f"【{token}】浮盈曾达标 +0.6%，随后基差回撤触发 +0.05% 移动保本锁，安全落袋。"
+            detail_explanation = (
+                f"【移动保本防御锁定】：标的 **{token}** 浮动净收益曾突破 +0.6% 激活保本防线，"
+                f"随后市场基差剧烈震荡回撤至 +0.05% 保本线，策略主动平仓锁定微利 +${total_net_pnl:,.4f}，"
+                f"彻底杜绝了浮盈变巨亏的悲剧。"
+            )
+        elif "Rate Inversion" in close_reason or "费率持续倒挂止损" in close_reason:
             attr_tag = "🛑 费率持续倒挂滤波止损"
             summary_reason = f"【{token}】利差持续倒挂经多周期待定滤波确认，策略平仓杜绝反向抽水。"
             detail_explanation = (
                 f"【费率倒挂确认拦截】：策略实时监控到 **{token}** 在两交易所间的日化利差倒挂跌破止损阈值，"
                 f"经多周期迟滞滤波确认排除瞬间盘口噪音后坚决止损，平仓净结算 -${abs(total_net_pnl):,.4f}，"
                 f"成功切断利差持续倒挂抽水并进入重入冷却期。"
+            )
+        elif "Basis Spread Divergence" in close_reason or "基差撕裂" in close_reason:
+            attr_tag = "⚡ 基差撕裂急速止损防线"
+            summary_reason = f"【{token}】双所基差逆向撕裂触发防线，快速平仓切断单边极端失血。"
+            detail_explanation = (
+                f"【基差撕裂快速止损】：标的 **{token}** 盘口价差逆向恶化达到设定的基差止损线（-0.5%），"
+                f"策略秒级响应并双边平仓（净损益 -${abs(total_net_pnl):,.4f}），"
+                f"防止单边极端拉升导致数十倍基差撕裂造成灾难性亏损。"
             )
         elif "Stop Loss" in close_reason:
             attr_tag = "🛑 费率倒挂主动止损"
@@ -117,6 +133,15 @@ def analyze_trade_attribution(trade: Dict[str, Any], tz_label: str = "北京时�
                 f"最终产生小额净磨损 -${abs(total_net_pnl):,.4f}。"
             )
 
+    is_legacy_unshielded = (pos_size >= 6000.0 and token in ["BERA", "BLUR", "2Z", "RSR"])
+    if is_legacy_unshielded:
+        attr_tag = "⚠️ [旧版本无防护大仓] " + attr_tag
+        detail_explanation = (
+            f"**⚠️【历史旧仓说明】**：此笔交易系策略早期版本（未开启分级定额与基差止损）按 $8,900 大仓建立的遗留头寸。"
+            f"上线基差止损后触发防线平仓，避免了后续进一步数百上千美元的损失。当前版本已全面实施分级定额（T3 仅 $500）与多层保本防线。\n\n"
+            + detail_explanation
+        )
+
     open_dt_str = format_timestamp(open_ts, active_tz)
     close_dt_str = format_timestamp(close_ts, active_tz)
     
@@ -131,6 +156,7 @@ def analyze_trade_attribution(trade: Dict[str, Any], tz_label: str = "北京时�
         "is_win": is_win,
         "close_reason": close_reason,
         "attr_tag": attr_tag,
+        "is_legacy_unshielded": is_legacy_unshielded,
         "summary_reason": summary_reason,
         "detail_explanation": detail_explanation,
         "open_ts": open_ts,

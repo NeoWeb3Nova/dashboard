@@ -225,24 +225,71 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
     with col_m5:
         st.metric("🛡️ 综合净盈亏 (Net PnL)", f"${net_combined_pnl:+.4f}", "价差损益 + 资金费")
 
-    # --- Section A.1: Institutional Risk Shields - Quarantined Assets ---
+    # --- Section A.1: Institutional Risk Shields - Toxic Blacklist, Quarantine & Post-TP Lockout ---
+    permanent_blacklist = arb_data.get("permanent_blacklist", [])
     quarantined_tokens = arb_data.get("quarantined_tokens", {})
-    if quarantined_tokens:
-        with st.expander(f"🛡️ **量化风控动态隔离区 (Quarantined Assets)**：`{len(quarantined_tokens)}` 个高风险/重度亏损标的已熔断冷却", expanded=True):
-            st.caption("为避免深度不足、滑点失血（如 RSR 流动性陷阱）或短时单边剧烈行情导致策略持续亏损，风控引擎已对以下标的执行动态物理隔离拦截，冷却期结束后方可重新评估开仓。")
-            q_rows = []
-            for q_tok, q_info in quarantined_tokens.items():
-                rem_h = q_info.get("remaining_hours", 0.0)
-                rem_s = q_info.get("remaining_seconds", 0)
-                rem_str = f"{int(rem_h)}小时 {int((rem_s % 3600) // 60)}分钟" if rem_h >= 1.0 else f"{int(rem_s // 60)}分钟"
-                q_rows.append({
-                    "🚫 隔离代币": q_tok,
-                    "⚠️ 熔断原因": q_info.get("reason", "重度亏损触发熔断"),
-                    "⏳ 剩余冷却时间": rem_str,
-                    "📉 触发亏损额": f"${q_info.get('loss_amount', 0.0):,.2f}",
-                    "🛑 连续止损次数": q_info.get("consecutive_losses", 1),
-                })
-            st.dataframe(pd.DataFrame(q_rows), use_container_width=True, hide_index=True)
+    post_tp_lockout = arb_data.get("post_tp_lockout", {})
+
+    if permanent_blacklist or quarantined_tokens or post_tp_lockout:
+        total_intercepted = len(set(permanent_blacklist) | set(quarantined_tokens.keys()) | set(post_tp_lockout.keys()))
+        with st.expander(f"🛡️ **机构级量化风控拦截与熔断盾牌**：`{total_intercepted}` 个标的处于风控限制状态", expanded=True):
+            st.caption(
+                "机构级六重风控盾牌实时防御：拦截历史累计严重亏损毒币（累计净亏 ≥ $30 终生拉黑）、"
+                "短时严重失血/连续止损标的（24h 物理隔离）、以及刚止盈标的（4h 防高位追高锁定）。"
+            )
+
+            # 1. 永久拉黑毒币熔断区
+            if permanent_blacklist:
+                st.markdown(f"##### 🚫 永久拉黑毒币熔断名单 (`{len(permanent_blacklist)}` 个代币已终生熔断)")
+                st.caption("以下标的历史累计净亏损突破 $30 红线（前期无保护旧仓或严重摩擦币），算法已实行终生一票否决，不再建仓：")
+                b_cols = st.columns(min(len(permanent_blacklist), 4))
+                for i, b_tok in enumerate(permanent_blacklist):
+                    with b_cols[i % len(b_cols)]:
+                        st.markdown(
+                            f"<div style='background:#450a0a; border:1px solid #dc2626; border-radius:6px; padding:8px; margin-bottom:6px; text-align:center;'>"
+                            f"<span style='font-size:16px; font-weight:bold; color:#fca5a5;'>🚫 {b_tok}</span><br>"
+                            f"<span style='font-size:11px; color:#f87171;'>累计亏损超标终生熔断</span>"
+                            f"</div>",
+                            unsafe_allow_html=True
+                        )
+                        if st.button(f"🕊️ 赦免解封 {b_tok}", key=f"unbl_{b_tok}_{bot_name}", use_container_width=True):
+                            if send_strategy_command(bot_name, {"action": "unblacklist_token", "token": b_tok}):
+                                st.success(f"已发送解封指令，{b_tok} 已移出永久黑名单！")
+                                st.rerun()
+
+            # 2. 动态隔离区
+            if quarantined_tokens:
+                st.markdown(f"##### 🛑 动态隔离观察区 (`{len(quarantined_tokens)}` 个标的冷却中)")
+                q_rows = []
+                for q_tok, q_info in quarantined_tokens.items():
+                    if q_tok in permanent_blacklist:
+                        continue  # already shown in permanent blacklist
+                    rem_h = q_info.get("remaining_hours", 0.0)
+                    rem_s = q_info.get("remaining_seconds", 0)
+                    rem_str = f"{int(rem_h)}小时 {int((rem_s % 3600) // 60)}分钟" if rem_h >= 1.0 else f"{int(rem_s // 60)}分钟"
+                    q_rows.append({
+                        "代币": q_tok,
+                        "熔断原因": q_info.get("reason", "重度亏损触发熔断"),
+                        "剩余冷却": rem_str,
+                        "触发亏损额": f"${q_info.get('loss_amount', 0.0):,.2f}",
+                        "连续止损": q_info.get("consecutive_losses", 1),
+                    })
+                if q_rows:
+                    st.dataframe(pd.DataFrame(q_rows), use_container_width=True, hide_index=True)
+
+            # 3. 止盈防高位追高锁定
+            if post_tp_lockout:
+                st.markdown(f"##### 🔒 止盈防高位回踩锁定 (`{len(post_tp_lockout)}` 个标的高位防回踩中)")
+                tp_rows = []
+                for tp_tok, tp_info in post_tp_lockout.items():
+                    rem_m = tp_info.get("remaining_minutes", 0.0)
+                    tp_rows.append({
+                        "代币": tp_tok,
+                        "风控机制": "止盈后 4.0 小时防追高冷冻期 (Anti-Churning)",
+                        "剩余冷冻时间": f"{int(rem_m // 60)}h {int(rem_m % 60)}m" if rem_m >= 60 else f"{int(rem_m)}分钟",
+                        "解锁后动作": "恢复正常利差扫描评估",
+                    })
+                st.dataframe(pd.DataFrame(tp_rows), use_container_width=True, hide_index=True)
 
     # --- Section B: 4 Multi-Dimensional Tabs ---
     tab_pos, tab_closed, tab_rates, tab_charts = st.tabs([
@@ -429,6 +476,16 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                 pos_card_items[-1]["tier_badge_html"] = tier_badge_html
                 pos_card_items[-1]["tp_badge"] = tp_badge
 
+                breakeven_active = bool(p.get("breakeven_active", False))
+                if breakeven_active:
+                    be_badge = "🟢 移动保本已激活 (锁线: +0.05%)"
+                else:
+                    gap_to_be = max(0.0, 0.006 - net_pct)
+                    be_badge = f"⏳ 移动保本 (达+0.60%锁定，差{gap_to_be:.2%})"
+
+                pos_card_items[-1]["be_badge"] = be_badge
+                pos_card_items[-1]["breakeven_active"] = breakeven_active
+
                 # Compact Table Row: compact columns without excessive text bloat
                 if long_lev == 1 and short_lev == 1:
                     lev_tag = "🛡️ 1x免杠杆"
@@ -448,6 +505,7 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                     "双边总货值": f"${pos_size * 2:,.2f}",
                     "持币数量": coin_amt_str,
                     "强平安全垫": health_badge,
+                    "移动保本": be_badge,
                     "阶梯止盈": tp_badge,
                     "预期回本": table_payback_str,
                     "盘口浮亏": f"${unrealized_pnl:+.4f}",
@@ -497,7 +555,7 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                         with c_hd2:
                             st.markdown(f"⏱️ **开仓时刻**: `{item['open_time_str']}` *({tz_label})* &nbsp;&nbsp;|&nbsp;&nbsp; ⏳ **时长**: `{item['dur_str']}`")
                             st.markdown(f"🕒 **结算点**: `{item['countdown_str']}` &nbsp;&nbsp;|&nbsp;&nbsp; 🛡️ **强平盾**: `{item['health_badge']}`")
-                            st.markdown(f"🎯 **止盈状态**: `{item.get('tp_badge', '阶梯止盈监控中')}`")
+                            st.markdown(f"🎯 **止盈状态**: `{item.get('tp_badge', '阶梯止盈监控中')}` &nbsp;&nbsp;|&nbsp;&nbsp; `{item.get('be_badge', '保本监控')}`")
                         with c_hd3:
                             pnl_color = "#00e676" if item['net_pnl'] >= 0 else "#ff5252"
                             st.markdown(
@@ -554,6 +612,7 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                             pb_init_str = f"{pb_val:.1f}h" if pb_val > 0 else "0.0h (无倒贴)"
                             st.markdown(f"""
                             - 🎯 **阶梯止盈进度**: **{item.get('tp_badge', '阶梯止盈监控中')}**
+                            - 🛡️ **移动保本防线**: **{item.get('be_badge', '保本监控')}**
                             - ⏳ **覆盖开仓损耗预估时间**: **{item.get('dynamic_payback_str', '计算中...')}**
                             - 🏷️ **开仓初始评测回本**: `{pb_init_str}` *(风控硬性门槛: ≤12h)*
                             - 📉 **盘口价差净损益 (当前平仓对冲摩擦)**: `${item['unrealized_pnl']:+.4f}`
@@ -954,6 +1013,8 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
         if market_comp:
             active_tokens_set = {p.get("token") for p in active_pos}
             quarantined_dict = arb_data.get("quarantined_tokens", {})
+            perm_bl_set = set(arb_data.get("permanent_blacklist", []))
+            post_tp_set = set(arb_data.get("post_tp_lockout", {}).keys())
             rates_rows = []
             for m in market_comp:
                 tok = m.get("token", "")
@@ -964,8 +1025,12 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                 # Status
                 if tok in active_tokens_set:
                     status_badge = "🟢 活跃持仓中"
+                elif tok in perm_bl_set:
+                    status_badge = "🚫 永久拉黑毒币"
+                elif tok in post_tp_set:
+                    status_badge = "🔒 止盈防追高锁定"
                 elif tok in quarantined_dict:
-                    status_badge = "🚫 隔离风控中"
+                    status_badge = "🛑 动态隔离中"
                 elif daily_diff >= thresh_pct:
                     status_badge = "✅ 利差达标(候选)"
                 else:
