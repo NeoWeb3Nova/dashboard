@@ -90,6 +90,25 @@ def get_cached_market_opportunities():
         return []
 
 
+def send_strategy_command(bot_name: str, command: dict) -> bool:
+    """Send real-time strategy commands (add_token, remove_token, trigger_rotation) to bot data directory."""
+    try:
+        candidate_dirs = [
+            f"/home/neo/projects/hummingbot/hummingbot-api/bots/instances/{bot_name}/data",
+            os.path.abspath(os.path.join(os.path.dirname(__file__), f"../../../hummingbot-api/bots/instances/{bot_name}/data")),
+            "/home/hummingbot/data"
+        ]
+        for d in candidate_dirs:
+            if os.path.isdir(d):
+                cmd_path = os.path.join(d, "strategy_commands.json")
+                with open(cmd_path, "w") as f:
+                    json.dump(command, f, indent=2)
+                return True
+        return False
+    except Exception:
+        return False
+
+
 def render_funding_arbitrage_tables(arb_data, bot_name):
     """Render visual tables and rich Plotly charts for Funding Rate Arbitrage positions, closed trades, and liquidity depth."""
     active_pos = arb_data.get("active_positions", [])
@@ -293,14 +312,26 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                 dist_short = p.get("liq_distance_2_pct", 0.30) if side == "BUY" else p.get("liq_distance_1_pct", 0.30)
 
                 min_dist = p.get("min_liq_distance_pct", min(dist_long, dist_short))
-                if min_dist >= 0.20:
-                    health_badge = f"🟢 充沛 (+{min_dist:.1%})"
-                elif min_dist >= 0.12:
-                    health_badge = f"🟡 良好 (+{min_dist:.1%})"
+                req_buf = float(p.get("liquidation_buffer_req_pct", 0.08))
+                tier_num = int(p.get("tier", 2))
+                if min_dist >= req_buf * 2:
+                    health_badge = f"🟢 充沛 (+{min_dist:.1%} / 门槛 {req_buf:.0%})"
+                elif min_dist >= req_buf * 1.2:
+                    health_badge = f"🟡 适中 (+{min_dist:.1%} / 门槛 {req_buf:.0%})"
                 else:
-                    health_badge = f"🔴 警戒 (+{min_dist:.1%})"
+                    health_badge = f"🔴 临界防御 (+{min_dist:.1%} / 门槛 {req_buf:.0%})"
 
+                # Partial Take Profit Badge (Option B)
+                partial_done = bool(p.get("partial_tp_executed", False))
+                locked_pnl = float(p.get("locked_tp_pnl", 0.0))
                 pos_size = float(p.get('position_size', 0))
+                net_pnl = float(p.get('net_pnl', 0))
+                if partial_done:
+                    tp_badge = f"⚡ 已锁定50%利润 (+${locked_pnl:.2f}) | 目标 +2.0% 终极平仓"
+                else:
+                    target_stage1 = pos_size * 0.010
+                    gap_stage1 = max(0.0, target_stage1 - net_pnl)
+                    tp_badge = f"⏳ 阶段1: +1.0% (差 ${gap_stage1:.2f} 锁50%)"
                 single_long_margin = pos_size / long_lev if long_lev > 0 else pos_size / 3.0
                 single_short_margin = pos_size / short_lev if short_lev > 0 else pos_size / 3.0
                 real_margin = single_long_margin + single_short_margin
@@ -396,6 +427,7 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                 pos_card_items[-1]["dynamic_payback_str"] = dynamic_payback_str
                 pos_card_items[-1]["hourly_funding_usd"] = hourly_funding_usd
                 pos_card_items[-1]["tier_badge_html"] = tier_badge_html
+                pos_card_items[-1]["tp_badge"] = tp_badge
 
                 # Compact Table Row: compact columns without excessive text bloat
                 if long_lev == 1 and short_lev == 1:
@@ -416,6 +448,7 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                     "双边总货值": f"${pos_size * 2:,.2f}",
                     "持币数量": coin_amt_str,
                     "强平安全垫": health_badge,
+                    "阶梯止盈": tp_badge,
                     "预期回本": table_payback_str,
                     "盘口浮亏": f"${unrealized_pnl:+.4f}",
                     "累计资金费": f"${funding_inc:+.4f} ({settle_cnt}次)",
@@ -464,6 +497,7 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                         with c_hd2:
                             st.markdown(f"⏱️ **开仓时刻**: `{item['open_time_str']}` *({tz_label})* &nbsp;&nbsp;|&nbsp;&nbsp; ⏳ **时长**: `{item['dur_str']}`")
                             st.markdown(f"🕒 **结算点**: `{item['countdown_str']}` &nbsp;&nbsp;|&nbsp;&nbsp; 🛡️ **强平盾**: `{item['health_badge']}`")
+                            st.markdown(f"🎯 **止盈状态**: `{item.get('tp_badge', '阶梯止盈监控中')}`")
                         with c_hd3:
                             pnl_color = "#00e676" if item['net_pnl'] >= 0 else "#ff5252"
                             st.markdown(
@@ -519,6 +553,7 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                             pb_val = item.get("payback_hours", 0.0)
                             pb_init_str = f"{pb_val:.1f}h" if pb_val > 0 else "0.0h (无倒贴)"
                             st.markdown(f"""
+                            - 🎯 **阶梯止盈进度**: **{item.get('tp_badge', '阶梯止盈监控中')}**
                             - ⏳ **覆盖开仓损耗预估时间**: **{item.get('dynamic_payback_str', '计算中...')}**
                             - 🏷️ **开仓初始评测回本**: `{pb_init_str}` *(风控硬性门槛: ≤12h)*
                             - 📉 **盘口价差净损益 (当前平仓对冲摩擦)**: `${item['unrealized_pnl']:+.4f}`
@@ -886,28 +921,68 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
 
 
     with tab_rates:
+        rot_info = arb_data.get("rotation_status", {})
+        rot_enabled = rot_info.get("auto_rotation_enabled", True)
+        last_rot_ts = float(rot_info.get("last_rotation_timestamp", 0.0))
+        next_rot_ts = float(rot_info.get("next_rotation_timestamp", 0.0))
+        rot_int_m = int(rot_info.get("rotation_interval_minutes", 30))
+        min_apr_th = float(rot_info.get("min_apr_threshold", 0.35)) * 100.0
+        min_delta_th = float(rot_info.get("min_apr_delta", 0.40)) * 100.0
+
+        # --- Section 1: Auto-Rotation Status & Control Console ---
+        rot_c1, rot_c2, rot_c3 = st.columns([2.5, 2.0, 1.5])
+        with rot_c1:
+            st.markdown(f"**🤖 标的池全自动轮换引擎 (Auto-Rotation)**: `{'🟢 运行中' if rot_enabled else '⏸️ 已暂停'}`")
+            last_str = format_timestamp(last_rot_ts, active_tz, "%H:%M:%S") if last_rot_ts > 0 else "尚未触发"
+            next_str = format_timestamp(next_rot_ts, active_tz, "%H:%M:%S") if next_rot_ts > 0 else "即将检测"
+            st.caption(f"每 **{rot_int_m} 分钟** 全网轮询 | 上次轮换: `{last_str}` | 下次预计: `{next_str}`")
+        with rot_c2:
+            st.markdown(f"**🎯 轮换门槛标准 (方案 B)**")
+            st.caption(f"最低准入: `APR ≥ {min_apr_th:.0f}%` | 换币差额: `ΔAPR ≥ {min_delta_th:.0f}%` *(回本<29h)*")
+        with rot_c3:
+            if st.button("⚡ 立即触发全网最优轮换", key=f"btn_rot_now_{bot_name}", use_container_width=True):
+                success = send_strategy_command(bot_name, {"action": "trigger_rotation"})
+                if success:
+                    st.toast("✅ 已向后台发送立即轮换指令！策略将在 5 秒内扫描并热更新标的池。")
+                    st.rerun()
+                else:
+                    st.error("写入指令失败，请检查实例运行状态")
+
+        st.markdown("---")
         thresh_pct = arb_data.get("min_funding_rate_profitability_pct", 0.1)
-        st.caption(f"ℹ️ 策略后台实时扫描的各币种利差对比（当前设定开仓门槛：日化利差 ≥ {thresh_pct:+.4f}% / 天 | 当前显示时区：{tz_label}）")
+        st.caption(f"ℹ️ 策略后台实时维护的各币种利差对比（当前设定开仓门槛：日化利差 ≥ {thresh_pct:+.4f}% / 天 | 当前显示时区：{tz_label}）")
         if market_comp:
+            active_tokens_set = {p.get("token") for p in active_pos}
+            quarantined_dict = arb_data.get("quarantined_tokens", {})
             rates_rows = []
             for m in market_comp:
                 tok = m.get("token", "")
                 daily_diff = m.get('daily_rate_diff_pct', 0)
                 apr_val = daily_diff * 365
                 apr_str = f"{apr_val:+.2f}%" if abs(apr_val) < 10000 else f"{apr_val:+.2e}%"
-                status_str = "✅ 已达标 (开仓)" if daily_diff >= thresh_pct else f"⏳ 观望中 (差 {(thresh_pct - daily_diff):.4f}%)"
+
+                # Status
+                if tok in active_tokens_set:
+                    status_badge = "🟢 活跃持仓中"
+                elif tok in quarantined_dict:
+                    status_badge = "🚫 隔离风控中"
+                elif daily_diff >= thresh_pct:
+                    status_badge = "✅ 利差达标(候选)"
+                else:
+                    status_badge = f"⏳ 观望中 (差 {(thresh_pct - daily_diff):.4f}%)"
+
                 bn_url = get_official_market_url("binance_perpetual", tok)
                 hl_url = get_official_market_url("hyperliquid_perpetual", tok)
                 res_url = get_token_research_urls(tok)["coinglass"]
                 row = {
                     "监控币种": tok,
+                    "持仓状态": status_badge,
                     "币安官方K线": bn_url,
                     "HL官方盘口": hl_url,
                     "代币官网与资料": res_url,
                     "推荐套利组合 (Path)": m.get("best_path", "N/A"),
                     "折算日化利差 (Daily Diff)": f"{daily_diff:+.4f}% / 天" if abs(daily_diff) < 1000 else f"{daily_diff:+.2e}% / 天",
                     "折算年化利差 (APR)": apr_str,
-                    "门槛达标状态": status_str,
                 }
                 for k, v in m.items():
                     if k.endswith("_rate_daily"):
@@ -922,11 +997,33 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
             }
             st.dataframe(pd.DataFrame(rates_rows), use_container_width=True, hide_index=True, column_config=rates_col_cfg)
 
+            # --- Section 2: Quick Watchlist Management Controller ---
+            watched_toks = [m.get("token") for m in market_comp]
+            st.markdown("##### 🎛️ 监控池快捷管理与热配置控制台")
+            col_rm_sel, col_rm_btn, col_add_txt, col_add_btn = st.columns([2, 1.2, 2, 1.2])
+            with col_rm_sel:
+                rm_target = st.selectbox("选择移出标的", watched_toks, key=f"rm_sel_{bot_name}", label_visibility="collapsed")
+            with col_rm_btn:
+                if st.button("➖ 移出监控", key=f"btn_rm_{bot_name}", use_container_width=True):
+                    if rm_target:
+                        send_strategy_command(bot_name, {"action": "remove_token", "token": rm_target})
+                        st.toast(f"✅ 已向策略发送移出 {rm_target} 指令！若有持仓将安全平仓后退出。")
+                        st.rerun()
+            with col_add_txt:
+                new_target = st.text_input("输入币种代码 (如 SUI, APT)", key=f"add_txt_{bot_name}", label_visibility="collapsed").strip().upper()
+            with col_add_btn:
+                if st.button("➕ 加入监控", key=f"btn_add_{bot_name}", use_container_width=True):
+                    if new_target:
+                        send_strategy_command(bot_name, {"action": "add_token", "token": new_target})
+                        st.toast(f"✅ 已向策略发送加入 {new_target} 指令！连接器正建立 WebSocket 监听。")
+                        st.rerun()
+
+            # --- Section 3: 200+ Market Radar with Quick-Add ---
             with st.expander("📡 查看全市场 200+ 标的实时高利差机会雷达 (Market Radar)", expanded=False):
                 try:
                     all_opps = get_cached_market_opportunities()
                     if all_opps:
-                        st.caption("ℹ️ 当前全市场正在爆发高利差的潜力标的排行榜（如果当前机器人监控币种利差较低，可参考此列表挑选并切换标的）：")
+                        st.caption("ℹ️ 当前全市场正在爆发高利差的潜力标的排行榜（点击即可一键加入实盘监控池）：")
                         radar_rows = []
                         for i, o in enumerate(all_opps[:15], 1):
                             tok = o["coin"]
@@ -954,8 +1051,43 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                             "官网资料": st.column_config.LinkColumn("官网资料", display_text="🌐 资料 ↗"),
                         }
                         st.dataframe(pd.DataFrame(radar_rows), use_container_width=True, hide_index=True, column_config=radar_col_cfg)
+
+                        # One-Click Add from Radar
+                        top_radar_toks = [o["coin"] for o in all_opps[:15] if o["coin"] not in watched_toks]
+                        if top_radar_toks:
+                            r_add_c1, r_add_c2 = st.columns([3, 1.5])
+                            with r_add_c1:
+                                quick_add_tok = st.selectbox("从雷达前 15 名中挑选潜力标的一键加入监控", top_radar_toks, key=f"quick_radar_add_{bot_name}")
+                            with r_add_c2:
+                                st.write("")
+                                st.write("")
+                                if st.button(f"➕ 将 {quick_add_tok} 纳入监控", key=f"btn_quick_radar_add_{bot_name}", use_container_width=True):
+                                    send_strategy_command(bot_name, {"action": "add_token", "token": quick_add_tok})
+                                    st.toast(f"✅ 已向策略发送加入 {quick_add_tok} 指令！")
+                                    st.rerun()
                 except Exception as e:
                     st.info(f"全市场雷达加载中: {e}")
+
+            # --- Section 4: Auto-Rotation Audit Log ---
+            rot_events = rot_info.get("rotation_events", [])
+            with st.expander(f"🔄 自动轮换历史审计流水 ({len(rot_events)} 笔记录)", expanded=False):
+                if rot_events:
+                    ev_rows = []
+                    for ev in rot_events:
+                        ev_ts = ev.get("timestamp", 0)
+                        ev_time_str = format_timestamp(ev_ts, active_tz) if ev_ts > 0 else "N/A"
+                        ev_rows.append({
+                            "轮换时间": ev_time_str,
+                            "淘汰闲置币": ev.get("retired_token", "NONE"),
+                            "原年化 (APR)": f"{ev.get('retired_apr', 0.0):+.1f}%",
+                            "晋级新候选": ev.get("added_token", ""),
+                            "新年化 (APR)": f"{ev.get('added_apr', 0.0):+.1f}%",
+                            "利差增量 (ΔAPR)": f"+{ev.get('apr_delta', 0.0):.1f}%",
+                            "轮换触发原因": ev.get("reason", "Yield Optimization"),
+                        })
+                    st.dataframe(pd.DataFrame(ev_rows), use_container_width=True, hide_index=True)
+                else:
+                    st.info("ℹ️ 暂无自动轮换事件记录（引擎每 30 分钟轮询一次全市场，遇到闲置低利差且外部高利差时将自动触发轮换）")
         else:
             st.info("ℹ️ 正在连接交易所拉取实时费率对比数据...")
 
