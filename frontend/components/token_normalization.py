@@ -147,15 +147,21 @@ def to_canonical_token(symbol: str, connector_name: str = "") -> str:
     if clean_sym in CANONICAL_TOKEN_REGISTRY:
         return clean_sym
 
-    # 3. Algorithmic heuristic fallback
+    # 3. Algorithmic heuristic fallback across industry exchanges
     # Hyperliquid 'k' prefix is explicitly lowercase: kPEPE, kSHIB, kBONK, kFLOKI, kLUNC
     # Genuine tickers like KAITO, KAS, KAVA start with uppercase 'K'
     if raw_clean.startswith("k") and len(raw_clean) >= 4 and raw_clean[1:].isupper():
         return raw_clean[1:]
-    # Binance / Bybit '1000000' prefix
+    # dYdX '1k' prefix (e.g. 1kPEPE)
+    if clean_sym.startswith("1K") and len(clean_sym) > 3:
+        return clean_sym[2:]
+    # Binance / Bybit / Gate '1000000' prefix (e.g. 1000000MOG)
     if clean_sym.startswith("1000000") and len(clean_sym) > 7:
         return clean_sym[7:]
-    # Binance / Bybit '1000' prefix
+    # Bybit '10000' prefix (e.g. 10000LADYS)
+    if clean_sym.startswith("10000") and len(clean_sym) > 5:
+        return clean_sym[5:]
+    # Binance / Bybit / Bitget / KuCoin '1000' prefix (e.g. 1000PEPE, 1000BONK)
     if clean_sym.startswith("1000") and len(clean_sym) > 4:
         return clean_sym[4:]
 
@@ -165,10 +171,11 @@ def to_canonical_token(symbol: str, connector_name: str = "") -> str:
 def to_exchange_symbol(canonical_token: str, connector_name: str) -> str:
     """
     Convert a canonical token (or arbitrary symbol) to the exchange-specific native ticker.
-    E.g. ('PEPE', 'binance_perpetual') -> '1000PEPE'
-         ('PEPE', 'hyperliquid_perpetual') -> 'kPEPE'
-         ('BTC', 'binance_perpetual') -> 'BTC'
-         ('KAITO', 'hyperliquid_perpetual') -> 'KAITO'
+    Supports all major CEX and DEX derivative platforms:
+    - Binance / Bybit / Bitget / KuCoin: 1000PEPE, 1000SHIB, 1000000MOG
+    - Hyperliquid: kPEPE, kSHIB, kBONK
+    - dYdX: 1kPEPE
+    - OKX: PEPE (quotes per base coin or standard swap symbol)
     """
     canon = to_canonical_token(canonical_token, connector_name)
     c_lower = (connector_name or "").lower()
@@ -182,10 +189,12 @@ def to_exchange_symbol(canonical_token: str, connector_name: str) -> str:
 
     # Algorithmic fallback
     if "hyperliquid" in c_lower:
-        # Check if HL prefers k-prefix for this canonical meme
         if canon in ["PEPE", "SHIB", "BONK", "FLOKI", "LUNC", "CAT", "CHEEMS"]:
             return f"k{canon}"
-    elif "binance" in c_lower or "bybit" in c_lower:
+    elif "dydx" in c_lower:
+        if canon in ["PEPE", "SHIB", "BONK"]:
+            return f"1k{canon}"
+    elif any(k in c_lower for k in ["binance", "bybit", "bitget", "kucoin"]):
         if canon in ["PEPE", "SHIB", "BONK", "FLOKI", "LUNC", "CAT", "CHEEMS", "WHY", "RATS", "SATS", "XEC"]:
             return f"1000{canon}"
         if canon in ["MOG", "BOB"]:
@@ -197,7 +206,11 @@ def to_exchange_symbol(canonical_token: str, connector_name: str) -> str:
 def get_token_multiplier(token: str, connector_name: str) -> float:
     """
     Get the contract unit multiplier for a token on a specific connector.
-    Returns 1000.0 for 1000PEPE/kPEPE, 1000000.0 for 1000000MOG, 1.0 for normal tokens (including KAITO, KAS).
+    Returns:
+    - 1000000.0 for 1000000MOG
+    - 10000.0 for 10000LADYS
+    - 1000.0 for 1000PEPE, kPEPE, 1kPEPE
+    - 1.0 for normal tokens (BTC, ETH, SOL, KAITO, KAS)
     """
     canon = to_canonical_token(token, connector_name)
     c_lower = (connector_name or "").lower()
@@ -210,9 +223,12 @@ def get_token_multiplier(token: str, connector_name: str) -> float:
 
     # Algorithmic fallback
     raw_clean = token.strip().split("-")[0]
-    if raw_clean.startswith("1000000"):
+    clean_sym = raw_clean.upper()
+    if clean_sym.startswith("1000000"):
         return 1000000.0
-    if raw_clean.startswith("1000"):
+    if clean_sym.startswith("10000"):
+        return 10000.0
+    if clean_sym.startswith("1000") or clean_sym.startswith("1K"):
         return 1000.0
     if raw_clean.startswith("k") and len(raw_clean) >= 4 and raw_clean[1:].isupper():
         return 1000.0
