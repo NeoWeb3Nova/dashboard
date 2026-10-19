@@ -643,15 +643,65 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                 )
 
             st.markdown("---")
-            st.markdown("##### 🔍 交易全过程细节与复盘归因分析 (Post-Mortem Review)")
+            c_title, c_sort, c_filter = st.columns([2.3, 1.4, 1.3])
+            with c_title:
+                st.markdown("##### 🔍 交易全过程细节与复盘归因分析 (Post-Mortem Review)")
+                st.caption(f"当前共 {len(analyzed_list)} 笔平仓对冲记录（默认按平仓时间倒序，最新在最前）")
+            with c_sort:
+                sort_opt = st.selectbox(
+                    "排序方式",
+                    [
+                        "🕒 平仓时间 (最新在前)",
+                        "🕒 平仓时间 (最早在前)",
+                        "💰 最终净利 (从高到低)",
+                        "🛑 最终净利 (从低到高)",
+                        "⏱️ 持仓历时 (从长到短)"
+                    ],
+                    key=f"sort_closed_{bot_name}",
+                    help="切换历史平仓成交排序方式，默认按平仓时间倒序"
+                )
+            with c_filter:
+                filter_opt = st.selectbox(
+                    "结果筛选",
+                    [
+                        f"全部交易 ({len(analyzed_list)})",
+                        f"🟢 仅看盈利单 ({summary_info['win_count']})",
+                        f"🔴 仅看止损/亏损单 ({summary_info['loss_count']})"
+                    ],
+                    key=f"filter_closed_{bot_name}",
+                    help="按盈亏结果筛选交易记录"
+                )
 
-            for idx, item in enumerate(analyzed_list):
+            # 执行排序
+            if "平仓时间 (最新在前)" in sort_opt:
+                display_list = sorted(analyzed_list, key=lambda x: x.get("close_ts", 0), reverse=True)
+            elif "平仓时间 (最早在前)" in sort_opt:
+                display_list = sorted(analyzed_list, key=lambda x: x.get("close_ts", 0), reverse=False)
+            elif "最终净利 (从高到低)" in sort_opt:
+                display_list = sorted(analyzed_list, key=lambda x: x.get("total_net_pnl", 0.0), reverse=True)
+            elif "最终净利 (从低到高)" in sort_opt:
+                display_list = sorted(analyzed_list, key=lambda x: x.get("total_net_pnl", 0.0), reverse=False)
+            elif "持仓历时 (从长到短)" in sort_opt:
+                display_list = sorted(analyzed_list, key=lambda x: x.get("dur_sec", 0), reverse=True)
+            else:
+                display_list = sorted(analyzed_list, key=lambda x: x.get("close_ts", 0), reverse=True)
+
+            # 执行筛选
+            if "仅看盈利单" in filter_opt:
+                display_list = [x for x in display_list if x.get("is_win", False)]
+            elif "仅看止损" in filter_opt:
+                display_list = [x for x in display_list if not x.get("is_win", False)]
+
+            if not display_list:
+                st.info("ℹ️ 当前筛选条件下暂无平仓记录。")
+
+            for idx, item in enumerate(display_list):
                 icon = "🟢" if item["is_win"] else "🔴"
                 pnl_sign = "+" if item["total_net_pnl"] >= 0 else ""
 
                 exp_title = (
-                    f"🪙【 {item['token']} 】  {icon} 净利 {pnl_sign}${item['total_net_pnl']:.4f} (ROE {item['roe_pct']:+.2f}%) "
-                    f"｜ 历时 {item['dur_str']} ｜ {item['attr_tag']}"
+                    f"#{idx+1:02d} 🪙【 {item['token']} 】  {icon} 净利 {pnl_sign}${item['total_net_pnl']:.4f} (ROE {item['roe_pct']:+.2f}%) "
+                    f"｜ 平仓: {item['close_dt_str']} ｜ 历时 {item['dur_str']} ｜ {item['attr_tag']}"
                 )
 
                 with st.expander(exp_title, expanded=(idx < 2)):
@@ -730,7 +780,7 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
             # --- 3. Full Tabular Data View ---
             with st.expander("📋 查看完整历史平仓数据总表 (可排序/筛选/导出)", expanded=False):
                 closed_rows = []
-                for item in analyzed_list:
+                for item in display_list:
                     closed_rows.append({
                         "标的代币": f"🪙 {item['token']}",
                         f"平仓时间 ({tz_label})": item["close_dt_str"],
