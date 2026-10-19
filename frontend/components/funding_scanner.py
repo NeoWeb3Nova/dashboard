@@ -102,8 +102,8 @@ def scan_cross_exchange_opportunities(
     bn_rates = fetch_binance_perpetual_funding_rates(timeout=timeout)
 
     # Use Canonical Asset Normalization to unlock high-liquidity meme coins (e.g. PEPE, BONK, SHIB)
-    # and safely filter out homonym collisions and unadjusted token splits
-    matched_pairs = match_canonical_cross_exchange_universes(hl_rates, bn_rates, max_price_divergence=0.03)
+    # and safely filter out homonym collisions and unadjusted token splits (tightened to 1.5% max divergence)
+    matched_pairs = match_canonical_cross_exchange_universes(hl_rates, bn_rates, max_price_divergence=0.015)
     results = []
 
     for pair in matched_pairs:

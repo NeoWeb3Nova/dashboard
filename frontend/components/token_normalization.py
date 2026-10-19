@@ -252,12 +252,12 @@ def to_exchange_trading_pair(canonical_token: str, connector_name: str) -> str:
 def match_canonical_cross_exchange_universes(
     hl_rates: Dict[str, Dict],
     bn_rates: Dict[str, Dict],
-    max_price_divergence: float = 0.03
+    max_price_divergence: float = 0.015
 ) -> List[Dict]:
     """
     Match Hyperliquid and Binance universes using Canonical Asset Resolution.
-    Verifies that multiplier-normalized prices match within max_price_divergence (default 3%).
-    Safely rejects homonyms and unannounced splits.
+    Verifies that multiplier-normalized prices match within max_price_divergence (default 1.5%).
+    Safely rejects homonyms, illiquid basis traps, and unannounced splits.
     """
     hl_canonical: Dict[str, Dict] = {}
     for raw_hl_sym, info in hl_rates.items():
