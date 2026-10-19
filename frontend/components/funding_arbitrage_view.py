@@ -650,11 +650,38 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                 pnl_sign = "+" if item["total_net_pnl"] >= 0 else ""
 
                 exp_title = (
-                    f"{icon} [{pnl_sign}${item['total_net_pnl']:.2f} | ROE {item['roe_pct']:+.2f}%] "
-                    f"{item['token']} (历时 {item['dur_str']}) | {item['close_reason']} | {item['attr_tag']}"
+                    f"🪙【 {item['token']} 】  {icon} 净利 {pnl_sign}${item['total_net_pnl']:.4f} (ROE {item['roe_pct']:+.2f}%) "
+                    f"｜ 历时 {item['dur_str']} ｜ {item['attr_tag']}"
                 )
 
                 with st.expander(exp_title, expanded=(idx < 2)):
+                    # 🌟 头部超醒目代币与归因卡片 Banner
+                    banner_border = "#22c55e" if item["is_win"] else "#ef4444"
+                    banner_bg = "rgba(34, 197, 94, 0.12)" if item["is_win"] else "rgba(239, 68, 68, 0.12)"
+                    st.markdown(
+                        f"""
+                        <div style="background: {banner_bg}; 
+                                    border-left: 6px solid {banner_border}; 
+                                    border-radius: 6px; 
+                                    padding: 10px 16px; 
+                                    margin-bottom: 14px; 
+                                    display: flex; 
+                                    align-items: center; 
+                                    justify-content: space-between;">
+                            <div>
+                                <span style="font-size: 11px; color: #94A3B8; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px;">套利复盘核心标的 (Target Asset)</span><br/>
+                                <span style="font-size: 24px; font-weight: 900; color: #FFFFFF; letter-spacing: 1px;">🪙 {item['token']}</span>
+                                <span style="background: rgba(148, 163, 184, 0.25); color: #E2E8F0; font-size: 13px; font-weight: 600; padding: 3px 10px; border-radius: 4px; margin-left: 10px;">{item['connector_1']} ⇋ {item['connector_2']}</span>
+                            </div>
+                            <div style="text-align: right;">
+                                <span style="font-size: 11px; color: #94A3B8;">盈亏因果定性归因</span><br/>
+                                <span style="font-size: 15px; font-weight: 700; color: {'#4ADE80' if item['is_win'] else '#F87171'};">{item['attr_tag']}</span>
+                            </div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True
+                    )
+
                     # Bento 4 Metrics
                     bm1, bm2, bm3, bm4 = st.columns(4)
                     with bm1:
@@ -676,6 +703,7 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                     c_det1, c_det2 = st.columns(2)
                     with c_det1:
                         st.markdown(f"**📋 交易生命周期时间线**:")
+                        st.markdown(f"- **🪙 标的代码**：**`{item['token']}`**")
                         st.markdown(f"- **开仓时间 ({tz_label})**：`{item['open_dt_str']}`")
                         st.markdown(f"- **平仓时间 ({tz_label})**：`{item['close_dt_str']}`")
                         st.markdown(f"- **持仓历时**：`{item['dur_str']}`（精确秒数：`{item['dur_sec']}` 秒）")
@@ -704,16 +732,16 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                 closed_rows = []
                 for item in analyzed_list:
                     closed_rows.append({
+                        "标的代币": f"🪙 {item['token']}",
                         f"平仓时间 ({tz_label})": item["close_dt_str"],
-                        f"开仓时间 ({tz_label})": item["open_dt_str"],
                         "持仓时长": item["dur_str"],
-                        "标的币种": item["token"],
-                        "盈亏归因标签": item["attr_tag"],
-                        "平仓原因": item["close_reason"],
-                        "价差损益": f"${item['trading_pnl']:+.4f}",
-                        "资金费净利息": f"${item['funding_pnl']:+.4f}",
                         "最终实现净利润 (Net PnL)": f"${item['total_net_pnl']:+.4f}",
                         "真实实缴ROE": f"{item['roe_pct']:+.2f}%",
+                        "盈亏归因标签": item["attr_tag"],
+                        "平仓原因": item["close_reason"],
+                        "资金费净利息": f"${item['funding_pnl']:+.4f}",
+                        "价差损益": f"${item['trading_pnl']:+.4f}",
+                        f"开仓时间 ({tz_label})": item["open_dt_str"],
                         "腿1官方行情": item["c1_url"],
                         "腿2官方行情": item["c2_url"],
                         "代币资料/官网": item["coinglass_url"],

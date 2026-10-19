@@ -56,64 +56,64 @@ def analyze_trade_attribution(trade: Dict[str, Any], tz_label: str = "北京时�
     if is_win:
         if funding_pnl > 0 and (funding_pnl >= abs(trading_pnl) or trading_pnl <= 0):
             attr_tag = "💰 资金费丰厚覆盖摩擦获利"
-            summary_reason = "利息现金流不仅完全消化了开平仓滑点与手续费，还锁定了稳健正收益。"
+            summary_reason = f"【{token}】利息现金流不仅完全消化了开平仓滑点与手续费，还锁定了稳健正收益。"
             detail_explanation = (
-                f"【资金费红利驱动】：在持仓的 {dur_str} 期间，策略稳定收割资金费现金流，"
+                f"【资金费红利驱动】：在 **{token}** 持仓的 {dur_str} 期间，策略稳定收割资金费现金流，"
                 f"累计净入账 +${funding_pnl:,.4f}。该利息现金流完全覆盖并超越了平仓价差损耗及手续费摩擦（-${abs(trading_pnl):,.4f}），"
                 f"最终实现净利润 +${total_net_pnl:,.4f}（实缴本金 ROE: {roe_pct:+.2f}%）。"
             )
         elif trading_pnl > 0:
             attr_tag = "📈 基差/价差收窄超额红利"
-            summary_reason = "双边盘口价差收敛带来超额盘口利润，提前触发策略止盈。"
+            summary_reason = f"【{token}】双边盘口价差收敛带来超额盘口利润，提前触发策略止盈。"
             extra_funding_str = f"，期间亦收取利息 +${funding_pnl:,.4f}" if funding_pnl > 0 else ""
             detail_explanation = (
-                f"【价差收敛红利驱动】：在持仓期间，{c1} 与 {c2} 之间的盘口价差向有利方向收窄（基差均值回归），"
+                f"【价差收敛红利驱动】：在 **{token}** 持仓期间，{c1} 与 {c2} 之间的盘口价差向有利方向收窄（基差均值回归），"
                 f"额外贡献了 +${trading_pnl:,.4f} 的盘口基差红利{extra_funding_str}，"
                 f"成功触发并超越设定的止盈线（Take Profit），机器人主动在最佳深度锁定平仓（净赚 +${total_net_pnl:,.4f}，ROE: {roe_pct:+.2f}%）。"
             )
         else:
             attr_tag = "🎯 综合达标止盈获利"
-            summary_reason = "总收益率达到预设目标，策略自动双边对冲平仓落袋。"
+            summary_reason = f"【{token}】总收益率达到预设目标，策略自动双边对冲平仓落袋。"
             detail_explanation = (
-                f"【止盈线达标退出】：累计净收益达到策略设定的止盈阈值，"
+                f"【止盈线达标退出】：标的 **{token}** 累计净收益达到策略设定的止盈阈值，"
                 f"机器人自动以最优市价挂单平仓，锁定净利润 +${total_net_pnl:,.4f}。"
             )
     else:
         if "Rate Inversion" in close_reason or "费率持续倒挂止损" in close_reason:
             attr_tag = "🛑 费率持续倒挂滤波止损"
-            summary_reason = "利差持续倒挂经多周期待定滤波确认，策略平仓杜绝反向抽水。"
+            summary_reason = f"【{token}】利差持续倒挂经多周期待定滤波确认，策略平仓杜绝反向抽水。"
             detail_explanation = (
-                f"【费率倒挂确认拦截】：策略实时监控到 {token} 在两交易所间的日化利差倒挂跌破止损阈值，"
+                f"【费率倒挂确认拦截】：策略实时监控到 **{token}** 在两交易所间的日化利差倒挂跌破止损阈值，"
                 f"经多周期迟滞滤波确认排除瞬间盘口噪音后坚决止损，平仓净结算 -${abs(total_net_pnl):,.4f}，"
                 f"成功切断利差持续倒挂抽水并进入重入冷却期。"
             )
         elif "Stop Loss" in close_reason:
             attr_tag = "🛑 费率倒挂主动止损"
-            summary_reason = "利差恶化跌破安全红线，策略坚决平仓杜绝反向抽水。"
+            summary_reason = f"【{token}】利差恶化跌破安全红线，策略坚决平仓杜绝反向抽水。"
             detail_explanation = (
-                f"【费率反抽风控拦截】：策略实时监控到 {token} 在两交易所间的日化利差恶化并跌破止损阈值（日化利差低于安全线），"
+                f"【费率反抽风控拦截】：策略实时监控到 **{token}** 在两交易所间的日化利差恶化并跌破止损阈值（日化利差低于安全线），"
                 f"系统坚决触发主动对冲止损。虽然双边平仓承担了点差与手续费摩擦 -${abs(trading_pnl):,.4f}（持仓期间回收资金费 +${funding_pnl:,.4f}，"
                 f"净结算 -${abs(total_net_pnl):,.4f}），但【坚决杜绝了利差倒挂导致本金被持续反向抽水】，完美履行风控铁律。"
             )
         elif "Liquidation Defense" in close_reason:
             attr_tag = "🛡️ 强平安全垫防御退出"
-            summary_reason = "单腿浮亏逼近强平线（安全垫 ≤ 8%），主动平仓保全本金。"
+            summary_reason = f"【{token}】单腿浮亏逼近强平线（安全垫 ≤ 8%），主动平仓保全本金。"
             detail_explanation = (
-                f"【强平防御保全本金】：市场突发极端单边脉冲，单腿保证金安全垫跌破防御警戒线（≤ 8%）。"
+                f"【强平防御保全本金】：标的 **{token}** 市场突发极端单边脉冲，单腿保证金安全垫跌破防御警戒线（≤ 8%）。"
                 f"系统果断执行双边主动平仓（净损益 -${abs(total_net_pnl):,.4f}），成功防范了单腿爆仓与穿仓破产的致命风险。"
             )
         elif "Rotation" in close_reason or "Ditch" in close_reason:
             attr_tag = "🔄 低产出标的主动轮换"
-            summary_reason = "标的利差衰退，主动释放资金轮换至全市场更高日息标的。"
+            summary_reason = f"【{token}】标的利差衰退，主动释放资金轮换至全市场更高日息标的。"
             detail_explanation = (
-                f"【机会成本优化退出】：该标的利差衰减至低产出区间，系统主动平仓释放占用保证金（净损益 ${total_net_pnl:+.4f}），"
+                f"【机会成本优化退出】：标的 **{token}** 利差衰减至低产出区间，系统主动平仓释放占用保证金（净损益 ${total_net_pnl:+.4f}），"
                 f"以便集中资金轮动至全市场日息更高（≥ 0.12%/天）的优质品种。"
             )
         else:
             attr_tag = "⏳ 摩擦成本未完全覆盖"
-            summary_reason = "持仓周期较短，利息尚未完全抵消开平仓摩擦即离场。"
+            summary_reason = f"【{token}】持仓周期较短，利息尚未完全抵消开平仓摩擦即离场。"
             detail_explanation = (
-                f"【摩擦回本未满退出】：持仓历时仅 {dur_str}，收取的资金费利息 +${funding_pnl:,.4f} 尚未完全覆盖双边开平仓的点差滑点与手续费损耗（-${abs(trading_pnl):,.4f}），"
+                f"【摩擦回本未满退出】：标的 **{token}** 持仓历时仅 {dur_str}，收取的资金费利息 +${funding_pnl:,.4f} 尚未完全覆盖双边开平仓的点差滑点与手续费损耗（-${abs(trading_pnl):,.4f}），"
                 f"最终产生小额净磨损 -${abs(total_net_pnl):,.4f}。"
             )
 
