@@ -153,6 +153,25 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
     with col_m5:
         st.metric("🛡️ 综合净盈亏 (Net PnL)", f"${net_combined_pnl:+.4f}", "价差损益 + 资金费")
 
+    # --- Section A.1: Institutional Risk Shields - Quarantined Assets ---
+    quarantined_tokens = arb_data.get("quarantined_tokens", {})
+    if quarantined_tokens:
+        with st.expander(f"🛡️ **量化风控动态隔离区 (Quarantined Assets)**：`{len(quarantined_tokens)}` 个高风险/重度亏损标的已熔断冷却", expanded=True):
+            st.caption("为避免深度不足、滑点失血（如 RSR 流动性陷阱）或短时单边剧烈行情导致策略持续亏损，风控引擎已对以下标的执行动态物理隔离拦截，冷却期结束后方可重新评估开仓。")
+            q_rows = []
+            for q_tok, q_info in quarantined_tokens.items():
+                rem_h = q_info.get("remaining_hours", 0.0)
+                rem_s = q_info.get("remaining_seconds", 0)
+                rem_str = f"{int(rem_h)}小时 {int((rem_s % 3600) // 60)}分钟" if rem_h >= 1.0 else f"{int(rem_s // 60)}分钟"
+                q_rows.append({
+                    "🚫 隔离代币": q_tok,
+                    "⚠️ 熔断原因": q_info.get("reason", "重度亏损触发熔断"),
+                    "⏳ 剩余冷却时间": rem_str,
+                    "📉 触发亏损额": f"${q_info.get('loss_amount', 0.0):,.2f}",
+                    "🛑 连续止损次数": q_info.get("consecutive_losses", 1),
+                })
+            st.dataframe(pd.DataFrame(q_rows), use_container_width=True, hide_index=True)
+
     # --- Section B: 4 Multi-Dimensional Tabs ---
     tab_pos, tab_closed, tab_rates, tab_charts = st.tabs([
         f"📈 活跃多空持仓 ({len(active_pos)})",

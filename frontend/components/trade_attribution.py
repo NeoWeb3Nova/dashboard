@@ -79,8 +79,15 @@ def analyze_trade_attribution(trade: Dict[str, Any], tz_label: str = "北京时�
                 f"机器人自动以最优市价挂单平仓，锁定净利润 +${total_net_pnl:,.4f}。"
             )
     else:
-        # 亏损归因
-        if "Stop Loss" in close_reason:
+        if "Rate Inversion" in close_reason or "费率持续倒挂止损" in close_reason:
+            attr_tag = "🛑 费率持续倒挂滤波止损"
+            summary_reason = "利差持续倒挂经多周期待定滤波确认，策略平仓杜绝反向抽水。"
+            detail_explanation = (
+                f"【费率倒挂确认拦截】：策略实时监控到 {token} 在两交易所间的日化利差倒挂跌破止损阈值，"
+                f"经多周期迟滞滤波确认排除瞬间盘口噪音后坚决止损，平仓净结算 -${abs(total_net_pnl):,.4f}，"
+                f"成功切断利差持续倒挂抽水并进入重入冷却期。"
+            )
+        elif "Stop Loss" in close_reason:
             attr_tag = "🛑 费率倒挂主动止损"
             summary_reason = "利差恶化跌破安全红线，策略坚决平仓杜绝反向抽水。"
             detail_explanation = (

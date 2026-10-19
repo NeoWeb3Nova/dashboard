@@ -333,6 +333,61 @@ with c_p3:
         help="设置该套利机器人的参考基准时区（默认北京时间 / 上海时间 UTC+8）。持仓看板、成交记录与结算通知均以此基准显示。"
     )
 
+with st.expander("🛡️ 高级风控与防抖防护盾 (Institutional Risk Shields)", expanded=False):
+    c_r1, c_r2, c_r3 = st.columns(3)
+    with c_r1:
+        max_payback_hours = st.number_input(
+            "回本周期硬拦截上限 (小时)",
+            min_value=1.0,
+            max_value=72.0,
+            value=12.0,
+            step=1.0,
+            help="开仓摩擦成本（双边买卖点差+手续费）按当前费率计算的回本小时数，超过该阈值坚决不开仓（默认 ≤ 12h）。"
+        )
+        max_entry_spread_friction_pct = st.number_input(
+            "开仓摩擦成本硬天花板 (%)",
+            min_value=0.05,
+            max_value=3.0,
+            value=0.50,
+            step=0.05,
+            format="%.2f",
+            help="无论资金费率多诱人，开仓瞬间盘口摩擦（点差+手续费）超过此百分比坚决不开仓，防止踩入流动性陷阱（默认 ≤ 0.5%）。"
+        ) / 100.0
+    with c_r2:
+        single_loss_quarantine_threshold = st.number_input(
+            "单笔亏损熔断阈值 (USDT)",
+            min_value=5.0,
+            max_value=500.0,
+            value=15.0,
+            step=5.0,
+            help="单笔交易若亏损超过此金额，该代币立即被关进禁闭室（隔离冷却），杜绝连续失血。"
+        )
+        token_quarantine_hours = st.number_input(
+            "毒币隔离冷却时长 (小时)",
+            min_value=1.0,
+            max_value=168.0,
+            value=24.0,
+            step=6.0,
+            help="触发熔断的代币在多少小时内完全禁止再次开仓（默认 24h）。"
+        )
+    with c_r3:
+        rate_inversion_confirmation_ticks = st.number_input(
+            "费率倒挂防假止损确认周期 (Ticks)",
+            min_value=1,
+            max_value=10,
+            value=3,
+            step=1,
+            help="利差倒挂必须连续维持 N 个心跳周期（默认 3 秒）才触发止损，过滤 1 秒毛刺噪音与误平仓。"
+        )
+        reentry_cooldown_seconds = st.number_input(
+            "平仓重入防抖冷却 (秒)",
+            min_value=60,
+            max_value=7200,
+            value=1800,
+            step=300,
+            help="平仓后至少等待多少秒才允许再次开仓相同代币（默认 1800 秒 / 30分钟），杜绝频繁来回磨损。"
+        )
+
 st.write("---")
 
 # ==================== 4. Live YAML Config Generation & Preview ====================
@@ -352,7 +407,13 @@ config_dict = {
     "min_funding_rate_profitability": float(min_funding_rate_profitability),
     "profitability_to_take_profit": float(profitability_to_take_profit),
     "funding_rate_diff_stop_loss": float(funding_rate_diff_stop_loss),
-    "trade_profitability_condition_to_enter": bool(trade_profitability_condition)
+    "trade_profitability_condition_to_enter": bool(trade_profitability_condition),
+    "max_payback_hours": float(max_payback_hours),
+    "max_entry_spread_friction_pct": float(max_entry_spread_friction_pct),
+    "token_quarantine_hours": float(token_quarantine_hours),
+    "single_loss_quarantine_threshold": float(single_loss_quarantine_threshold),
+    "rate_inversion_confirmation_ticks": int(rate_inversion_confirmation_ticks),
+    "reentry_cooldown_seconds": int(reentry_cooldown_seconds),
 }
 
 yaml_preview = yaml.dump(config_dict, default_flow_style=False, sort_keys=False)
