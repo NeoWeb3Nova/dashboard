@@ -139,13 +139,25 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
         ) for p in active_pos
     )
     gross_capital = total_capital * 2.0
+    effective_leverage = (gross_capital / real_margin_total) if real_margin_total > 0 else float(global_leverage)
+    single_margin = real_margin_total / 2.0
     roe_apr = (projected_daily_usd * 365.0 / real_margin_total * 100.0) if real_margin_total > 0 else 0.0
 
     col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns(5)
     with col_m1:
-        st.metric("💼 真实实缴本金 (总保证金)", f"${real_margin_total:,.2f}", f"多空 {global_leverage}x 实缴 (单边 ${real_margin_total/2:,.2f})")
+        st.metric(
+            "💼 真实实缴本金 (总保证金)",
+            f"${real_margin_total:,.2f}",
+            f"两所各押 ${single_margin:,.2f} ({effective_leverage:.1f}x 杠杆)",
+            help=f"双边实际在交易所质押的 USDT 保证金总额 = 多头保证金 + 空头保证金（两所各出资 ${single_margin:,.2f}，按 {effective_leverage:.1f}x 杠杆质押）"
+        )
     with col_m2:
-        st.metric("🎯 双边合约总货值 (Gross)", f"${gross_capital:,.2f}", f"单边对冲 ${total_capital:,.2f} (本金×{global_leverage}x)")
+        st.metric(
+            "🎯 双边合约总货值 (Gross)",
+            f"${gross_capital:,.2f}",
+            f"总本金×{effective_leverage:.1f}x 放大 (单边 ${total_capital:,.2f})",
+            help=f"双边合计控制的合约总名义资产 = 多头货值 (${total_capital:,.2f}) + 空头货值 (${total_capital:,.2f}) = 实缴总本金 (${real_margin_total:,.2f}) × {effective_leverage:.1f}x 杠杆放大；单边对冲敞口占总本金的 {total_capital/real_margin_total if real_margin_total>0 else 1.5:.1f}x"
+        )
     with col_m3:
         st.metric("💰 累计已收资金费", f"${total_funding_income:+.4f}", "每小时 / 8小时结算到账")
     with col_m4:
