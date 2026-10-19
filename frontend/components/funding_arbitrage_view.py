@@ -343,12 +343,21 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                         # Top bar of the card
                         c_hd1, c_hd2, c_hd3 = st.columns([1.8, 2.0, 1.2])
                         with c_hd1:
+                            if item['long_lev'] == 1 and item['short_lev'] == 1:
+                                lev_badge_html = (
+                                    f"<span style='font-size:12px; background:#064e3b; border:1px solid #059669; padding:3px 8px; border-radius:4px; color:#34d399; font-weight:600;'>"
+                                    f"🛡️ 1x 全额免杠杆安全对冲 (零爆仓风险)</span>"
+                                )
+                            else:
+                                lev_badge_html = (
+                                    f"<span style='font-size:12px; background:#1e293b; border:1px solid #334155; padding:3px 8px; border-radius:4px; color:#38bdf8; font-weight:600;'>"
+                                    f"⚡ 杠杆: 多{item['long_lev']}x | 空{item['short_lev']}x (大额资金增效)</span>"
+                                )
                             st.markdown(
-                                f"#### 🪙 `{item['token']}` &nbsp; "
-                                f"<span style='font-size:13px; background:#1e293b; border:1px solid #334155; padding:3px 8px; border-radius:4px; color:#38bdf8; font-weight:600;'>"
-                                f"⚡ 杠杆: 做多 {item['long_lev']}x | 做空 {item['short_lev']}x</span>",
+                                f"#### 🪙 `{item['token']}` &nbsp; {lev_badge_html}",
                                 unsafe_allow_html=True
                             )
+
                             st.caption(f"🧭 **对冲配对**: `🟢 {item['long_ex']} (多)` ⇄ `🔴 {item['short_ex']} (空)`")
 
                             # Official Exchange & Research Web Links

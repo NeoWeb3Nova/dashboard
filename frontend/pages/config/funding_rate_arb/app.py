@@ -256,12 +256,20 @@ c_p1, c_p2, c_p3 = st.columns(3)
 
 with c_p1:
     leverage = st.number_input(
-        "杠杆倍数 (Leverage)",
+        "目标杠杆倍数 (Target Leverage)",
         min_value=1,
         max_value=20,
-        value=5,
+        value=3,
         step=1,
-        help="设置合约的开仓杠杆。建议 2x~5x，安全稳健。"
+        help="设置合约开仓的目标杠杆。设为 1x 为全额现货级安全对冲（零爆仓风险）；建议 1x~3x。"
+    )
+    min_leverage_capital_threshold = st.number_input(
+        "小额免杠杆安全线 ($)",
+        min_value=0.0,
+        max_value=5000.0,
+        value=500.0,
+        step=50.0,
+        help="当仓位名义金额低于此安全线时，策略自动强制采用 1x 免杠杆安全对冲，杜绝小额资金承担不必要的单腿爆仓与止损摩擦风险。"
     )
     position_size_quote = st.number_input(
         "单仓名义价值 (USDT/USD)",
@@ -271,6 +279,7 @@ with c_p1:
         step=50.0,
         help="每个币种套利时建立的单边头寸价值"
     )
+
 
 with c_p2:
     min_funding_rate_profitability = st.number_input(
@@ -336,6 +345,7 @@ config_dict = {
     "connectors": [connector_1, connector_2],
     "tokens": final_tokens,
     "leverage": int(leverage),
+    "min_leverage_capital_threshold": float(min_leverage_capital_threshold),
     "position_size_quote": float(position_size_quote),
     "dynamic_position_sizing": bool(dynamic_position_sizing),
     "max_orderbook_depth_ratio": 0.3,
