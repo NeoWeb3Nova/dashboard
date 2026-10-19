@@ -194,7 +194,7 @@ with st.expander(f"📡 点击展开：全市场实时利差机会排行榜 (已
         # Display top 15 in nice visual dataframe with liquidity metrics
         radar_df = pd.DataFrame([{
             "排名": f"#{i}",
-            "标的代币": o["coin"],
+            "标的代币": o.get("display_name", o["coin"]),
             "折算年化 (APR)": f"{o['apr']:+.2f}%",
             "折算日化利差": f"{o['daily_diff_pct']:+.4f}% / 天",
             "流动性评级": o.get("liquidity_badge", "🟡 适中"),
@@ -207,9 +207,9 @@ with st.expander(f"📡 点击展开：全市场实时利差机会排行榜 (已
         st.dataframe(radar_df, use_container_width=True, hide_index=True)
 
         st.caption(
-            "💡 **量化避坑法则 (新手必读)**：部分超高 APR 标的（如 50%+）全天成交量较小（如 Hyperliquid 24h 成交不足 $10 万）。"
-            "若单笔开仓规模过大（如超过盘口深度），会产生较大冲击滑点吃掉利差利润。"
-            "**建议初期优先选择 `🟢 充沛` 或 `🟡 适中` 评级的标的**，或将单笔金额控制在推荐上限内！"
+            "💡 **标准化资产对齐与避坑法则**：已通过量化引擎自动对齐跨交易所不同命名与乘数代币（如 PEPE/BONK/SHIB/FLOKI/LUNC，Hyperliquid 为 k 乘数，Binance 为 1000 乘数），"
+            "并已通过 3% 价格偏差熔断拦截了可能重名或迁移折价的分叉代币。"
+            "超高利差但成交量较小（流动性较薄）的标的，建议将单笔金额控制在推荐上限内！"
         )
 
 # Selection controls

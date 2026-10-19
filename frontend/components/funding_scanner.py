@@ -88,6 +88,9 @@ def fetch_hyperliquid_perpetual_funding_rates(timeout: int = 5) -> Dict[str, Dic
     return rates
 
 
+from frontend.components.token_normalization import match_canonical_cross_exchange_universes
+
+
 def scan_cross_exchange_opportunities(
     connector_1: str = "hyperliquid_perpetual",
     connector_2: str = "binance_perpetual",
@@ -98,12 +101,18 @@ def scan_cross_exchange_opportunities(
     hl_rates = fetch_hyperliquid_perpetual_funding_rates(timeout=timeout)
     bn_rates = fetch_binance_perpetual_funding_rates(timeout=timeout)
 
-    common_coins = set(hl_rates.keys()) & set(bn_rates.keys())
+    # Use Canonical Asset Normalization to unlock high-liquidity meme coins (e.g. PEPE, BONK, SHIB)
+    # and safely filter out homonym collisions and unadjusted token splits
+    matched_pairs = match_canonical_cross_exchange_universes(hl_rates, bn_rates, max_price_divergence=0.03)
     results = []
 
-    for coin in common_coins:
-        h_info = hl_rates[coin]
-        b_info = bn_rates[coin]
+    for pair in matched_pairs:
+        coin = pair["canonical"]
+        h_info = pair["hl_info"]
+        b_info = pair["bn_info"]
+        hl_raw = pair["hl_raw_symbol"]
+        bn_raw = pair["bn_raw_symbol"]
+        is_multiplier = pair["is_multiplier_asset"]
 
         h_daily = h_info["rate_daily"]
         b_daily = b_info["rate_daily"]
@@ -143,8 +152,15 @@ def scan_cross_exchange_opportunities(
             safe_cap = "≤ $500"
             liq_rank = 0
 
+        display_name = f"{coin} ({hl_raw}/{bn_raw})" if is_multiplier else coin
+
         results.append({
             "coin": coin,
+            "display_name": display_name,
+            "hl_raw_symbol": hl_raw,
+            "bn_raw_symbol": bn_raw,
+            "is_multiplier": is_multiplier,
+            "price_divergence_pct": pair["price_divergence_pct"],
             "daily_diff_pct": daily_diff * 100.0,
             "diff_daily_pct": daily_diff * 100.0,
             "apr": apr,
