@@ -36,3 +36,11 @@
 - **单边货值 vs 双边货值**：对冲套利为双边开仓，严格区分 `单边货值` 与 `双边总货值 (2 × 单边货值)`。
 - **真实本金收益率 (ROE)**：ROE 必须以双边真实实缴保证金总额作为分母（`ROE = 24h 预计利息现金流 × 365 / 真实双边总保证金`）。
 - **标的生命周期归档**：淘汰标的必须通过优雅平仓归档至 `closed_trades` 历史表，标注 `close_reason`，严禁无声抹除数据。
+
+---
+
+## 6. 官方主版本同步与无缝升级准则 (Upstream Upgrade Discipline)
+- **代码物理隔离与插件插槽**：所有针对官方仓库（`hummingbot-dashboard`、`hummingbot-api` 等）的新功能，必须在独立自包含组件（如 `frontend/components/`）中编写，官方核心文件仅保留 2~3 行轻量插槽调用，严禁在官方主流程中硬编码海量业务代码，确保与官方主干合并冲突率为 0%。
+- **双源拓扑与一键运维**：必须配置 `upstream` 官方主源，并使用根目录自动化脚本 [`sync-upstream.sh`](file:///home/neo/projects/hummingbot/sync-upstream.sh) 维护状态。
+- **详细升级 SOP 与避坑流程**：详见 [`docs/UPSTREAM_UPGRADE_SOP.md`](file:///home/neo/projects/hummingbot/docs/UPSTREAM_UPGRADE_SOP.md)。
+
