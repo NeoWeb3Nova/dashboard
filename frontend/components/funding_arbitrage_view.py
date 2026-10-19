@@ -17,6 +17,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+from frontend.components.clock_monitor import get_exchange_clock_health
 from frontend.components.market_links import get_official_market_url, get_token_research_urls
 from frontend.components.timezone_utils import (
     format_timestamp,
@@ -24,6 +25,8 @@ from frontend.components.timezone_utils import (
     get_timezone_label,
     render_timezone_selector,
 )
+from frontend.components.trade_attribution import analyze_trade_attribution, calculate_closed_summary
+
 
 
 def render_funding_arbitrage_kpi_cards(arb_data, total_volume_traded, total_global_pnl_quote):
@@ -96,14 +99,25 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
 
     mode_badge = "🟢 纸面预演 (Dry-Run)" if is_dry_run else "🔴 实盘交易 (Live)"
 
-    col_hdr_title, col_hdr_tz = st.columns([3.5, 1.5])
+    col_hdr_title, col_hdr_clock, col_hdr_tz = st.columns([2.8, 1.1, 1.1])
     with col_hdr_title:
         st.markdown(f"#### 💰 资金费率套利持仓与量化透视 `{mode_badge}`")
+    with col_hdr_clock:
+        clock_health = get_exchange_clock_health()
+        st.caption(f"{clock_health.get('badge', '⏱️ 时钟正常')}")
     with col_hdr_tz:
         active_tz, tz_label = render_timezone_selector(
             key=f"tz_sel_{bot_name}",
             label="🌐 显示时区"
         )
+
+    if clock_health.get("status") == "danger":
+        st.warning(
+            f"⚠️ **【量化高精度时钟风险拦截警报】**：本地系统时钟与 Binance 合约服务器偏差达到 **`{clock_health.get('offset_ms', 0):+.0f}ms`**（逼近 1000ms 拒单红线）！\n\n"
+            f"- **风险成因**：WSL2/系统休眠唤醒后虚拟化时钟未对齐，高频下单极易遭遇交易所 `code: -1021 (Timestamp outside recvWindow)` 拒单，导致**一腿开平仓成功、一腿被拒单（裸奔风险）**！\n"
+            f"- **一键修复指南**：在宿主机终端执行 `sudo hwclock -s` 立即对齐时钟，或运行 `python3 scripts/check-clock-sync.py` 诊断。"
+        )
+
 
     # --- Section A: Summary Key Performance Metrics ---
     total_capital = sum(float(p.get("position_size", 0)) for p in active_pos)
@@ -500,41 +514,123 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
 
     with tab_closed:
         if closed_trades:
-            st.caption(f"ℹ️ 达到止盈目标（Take Profit）或触发费率倒挂止损（Stop Loss）而平仓的历史记录（当前时间基准：{tz_label}）")
-            closed_rows = []
-            for t in closed_trades:
-                close_dt = format_timestamp(t.get("close_timestamp", 0), active_tz)
-                open_dt = format_timestamp(t.get("open_timestamp", 0), active_tz)
-                dur_sec = max(0, int(t.get("close_timestamp", 0)) - int(t.get("open_timestamp", 0))) if t.get("close_timestamp") and t.get("open_timestamp") else 0
-                dur_str = f"{dur_sec // 3600}h {(dur_sec % 3600) // 60}m" if dur_sec > 0 else "N/A"
-                tok = t.get("token", "")
-                c1_name = t.get("connector_1", "binance_perpetual")
-                c2_name = t.get("connector_2", "hyperliquid_perpetual")
-                c1_url = get_official_market_url(c1_name, tok)
-                c2_url = get_official_market_url(c2_name, tok)
-                t_res = get_token_research_urls(tok)
-                closed_rows.append({
-                    f"平仓时间 ({tz_label})": close_dt,
-                    f"开仓时间 ({tz_label})": open_dt,
-                    "持仓时长": dur_str,
-                    "标的币种": tok,
-                    "官方K线 (腿1)": c1_url,
-                    "官方K线 (腿2)": c2_url,
-                    "代币资料/官网": t_res["coinglass"],
-                    "套利交易所": f"{c1_name} & {c2_name}",
-                    "平仓原因": t.get("close_reason", "Completed"),
-                    "价差损益": f"${t.get('trading_pnl', 0):+.4f}",
-                    "资金费净利息": f"${t.get('funding_pnl', 0):+.4f}",
-                    "最终实现净利润 (Net PnL)": f"${t.get('total_net_pnl', 0):+.4f}",
-                })
-            closed_col_cfg = {
-                "官方K线 (腿1)": st.column_config.LinkColumn("官方K线 (腿1)", display_text="📈 腿1K线 ↗"),
-                "官方K线 (腿2)": st.column_config.LinkColumn("官方K线 (腿2)", display_text="📈 腿2K线 ↗"),
-                "代币资料/官网": st.column_config.LinkColumn("代币资料/官网", display_text="🌐 官网资料 ↗"),
-            }
-            st.dataframe(pd.DataFrame(closed_rows), use_container_width=True, hide_index=True, column_config=closed_col_cfg)
+            analyzed_list = [analyze_trade_attribution(t, tz_label=tz_label, active_tz=active_tz) for t in closed_trades]
+            summary_info = calculate_closed_summary(analyzed_list)
+
+            st.caption(f"ℹ️ 达到止盈目标（Take Profit）或触发费率倒挂止损（Stop Loss）而平仓的历史成交复盘追踪（当前基准时区：{tz_label}）")
+
+            # --- 1. Summary KPI Metrics Bar ---
+            c_sm1, c_sm2, c_sm3, c_sm4 = st.columns(4)
+            with c_sm1:
+                st.metric(
+                    "📜 历史平仓总笔数",
+                    f"{summary_info['total_count']} 笔",
+                    f"胜率 {summary_info['win_rate_pct']:.1f}% ({summary_info['win_count']}胜 {summary_info['loss_count']}负)"
+                )
+            with c_sm2:
+                st.metric(
+                    "🎯 累计已结净利润 (Net PnL)",
+                    f"${summary_info['total_net_pnl']:+,.4f}",
+                    f"均单 ROE {summary_info['avg_roe_pct']:+.2f}%"
+                )
+            with c_sm3:
+                st.metric(
+                    "💰 资金费贡献 vs 价差摩擦",
+                    f"+${summary_info['total_funding_pnl']:,.2f}",
+                    f"价差摩擦 ${summary_info['total_trading_pnl']:+,.2f}"
+                )
+            with c_sm4:
+                st.metric(
+                    "⏱️ 平均持仓周期",
+                    summary_info["avg_dur_str"],
+                    "全生命周期对冲历时"
+                )
+
+            st.markdown("---")
+            st.markdown("##### 🔍 交易全过程细节与复盘归因分析 (Post-Mortem Review)")
+
+            for idx, item in enumerate(analyzed_list):
+                icon = "🟢" if item["is_win"] else "🔴"
+                pnl_sign = "+" if item["total_net_pnl"] >= 0 else ""
+
+                exp_title = (
+                    f"{icon} [{pnl_sign}${item['total_net_pnl']:.2f} | ROE {item['roe_pct']:+.2f}%] "
+                    f"{item['token']} (历时 {item['dur_str']}) | {item['close_reason']} | {item['attr_tag']}"
+                )
+
+                with st.expander(exp_title, expanded=(idx < 2)):
+                    # Bento 4 Metrics
+                    bm1, bm2, bm3, bm4 = st.columns(4)
+                    with bm1:
+                        st.metric("最终实结净利 (Net PnL)", f"${item['total_net_pnl']:+.4f}", f"真实实缴 ROE: {item['roe_pct']:+.2f}%")
+                    with bm2:
+                        st.metric("累计资金费净利息", f"${item['funding_pnl']:+.4f}", "纯利息现金流")
+                    with bm3:
+                        st.metric("盘口价差与摩擦损益", f"${item['trading_pnl']:+.4f}", "平仓基差与交易手续费")
+                    with bm4:
+                        st.metric("对冲持仓历时", item["dur_str"], f"{item['annualized_apr']:+.1f}% 年化参考")
+
+                    # 深度因果剖析 Box
+                    if item["is_win"]:
+                        st.success(f"**💡 为什么会盈利？（成因与归因剖析）**\n\n{item['detail_explanation']}")
+                    else:
+                        st.warning(f"**🛑 为什么会亏损？（成因与归因剖析）**\n\n{item['detail_explanation']}")
+
+                    # 交易细节与量化对账事实
+                    c_det1, c_det2 = st.columns(2)
+                    with c_det1:
+                        st.markdown(f"**📋 交易生命周期时间线**:")
+                        st.markdown(f"- **开仓时间 ({tz_label})**：`{item['open_dt_str']}`")
+                        st.markdown(f"- **平仓时间 ({tz_label})**：`{item['close_dt_str']}`")
+                        st.markdown(f"- **持仓历时**：`{item['dur_str']}`（精确秒数：`{item['dur_sec']}` 秒）")
+                        st.markdown(f"- **平仓触发原因**：`{item['close_reason']}`")
+                    with c_det2:
+                        st.markdown(f"**💼 财务口径与资本对账**:")
+                        st.markdown(f"- **单边名义货值**：`${item['pos_size']:,.2f}`（双边总货值 `${item['pos_size']*2:,.2f}`）")
+                        st.markdown(f"- **杠杆倍数**：`{item['leverage']}x` | **双边实缴本金**：`${item['real_margin']:,.2f}`")
+                        st.markdown(f"- **套利交易所组合**：`{item['connector_1']} ⇋ {item['connector_2']}`")
+                        st.markdown(f"- **归因成因概述**：`{item['summary_reason']}`")
+
+                    # 官方复盘直达按钮
+                    st.markdown("**🔗 官方行情与代币背景深度复盘直达**:")
+                    hl_col1, hl_col2, hl_col3, hl_col4 = st.columns(4)
+                    with hl_col1:
+                        st.link_button(f"🟢 {item['connector_1']} 官方K线/盘口 ↗", item["c1_url"], use_container_width=True)
+                    with hl_col2:
+                        st.link_button(f"🔴 {item['connector_2']} 官方K线/盘口 ↗", item["c2_url"], use_container_width=True)
+                    with hl_col3:
+                        st.link_button("📊 TradingView 大屏K线 ↗", item["tradingview_url"], use_container_width=True)
+                    with hl_col4:
+                        st.link_button("🌐 代币官网/CoinGlass ↗", item["coinglass_url"], use_container_width=True)
+
+            # --- 3. Full Tabular Data View ---
+            with st.expander("📋 查看完整历史平仓数据总表 (可排序/筛选/导出)", expanded=False):
+                closed_rows = []
+                for item in analyzed_list:
+                    closed_rows.append({
+                        f"平仓时间 ({tz_label})": item["close_dt_str"],
+                        f"开仓时间 ({tz_label})": item["open_dt_str"],
+                        "持仓时长": item["dur_str"],
+                        "标的币种": item["token"],
+                        "盈亏归因标签": item["attr_tag"],
+                        "平仓原因": item["close_reason"],
+                        "价差损益": f"${item['trading_pnl']:+.4f}",
+                        "资金费净利息": f"${item['funding_pnl']:+.4f}",
+                        "最终实现净利润 (Net PnL)": f"${item['total_net_pnl']:+.4f}",
+                        "真实实缴ROE": f"{item['roe_pct']:+.2f}%",
+                        "腿1官方行情": item["c1_url"],
+                        "腿2官方行情": item["c2_url"],
+                        "代币资料/官网": item["coinglass_url"],
+                    })
+                closed_col_cfg = {
+                    "腿1官方行情": st.column_config.LinkColumn("腿1官方行情", display_text="📈 腿1K线 ↗"),
+                    "腿2官方行情": st.column_config.LinkColumn("腿2官方行情", display_text="📈 腿2K线 ↗"),
+                    "代币资料/官网": st.column_config.LinkColumn("代币资料/官网", display_text="🌐 官网资料 ↗"),
+                }
+                st.dataframe(pd.DataFrame(closed_rows), use_container_width=True, hide_index=True, column_config=closed_col_cfg)
         else:
             st.info("ℹ️ 暂无历史平仓记录。")
+
 
     with tab_rates:
         thresh_pct = arb_data.get("min_funding_rate_profitability_pct", 0.1)
