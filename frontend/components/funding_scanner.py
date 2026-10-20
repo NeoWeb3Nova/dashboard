@@ -22,7 +22,15 @@ def fetch_binance_perpetual_funding_rates(timeout: int = 5) -> Dict[str, Dict]:
     except Exception:
         pass
 
-    # 2. Fetch funding rates
+    # Only a successful fundingInfo response permits the eight-hour default.
+    try:
+        req = urllib.request.Request("https://fapi.binance.com/fapi/v1/fundingInfo", headers={"User-Agent": "Hummingbot-audit"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            intervals = {r["symbol"]: int(r["fundingIntervalHours"]) for r in json.load(resp)}
+    except Exception:
+        return {}  # Unknown schedules must not become apparently profitable signals.
+
+    # 2. Fetch funding rate forecasts
     try:
         url = "https://fapi.binance.com/fapi/v1/premiumIndex"
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
@@ -36,7 +44,8 @@ def fetch_binance_perpetual_funding_rates(timeout: int = 5) -> Dict[str, Dict]:
                         rate_8h = float(item.get("lastFundingRate", 0.0))
                         mark_px = float(item.get("markPrice", 0.0))
                         rates[coin] = {
-                            "rate_daily": rate_8h * 3.0,
+                            "rate_daily": rate_8h * 24.0 / intervals.get(symbol, 8),
+                            "funding_interval_hours": intervals.get(symbol, 8),
                             "rate_8h": rate_8h,
                             "mark_price": mark_px,
                             "vol_24h_usd": vol_map.get(coin, 0.0),
@@ -98,6 +107,8 @@ def scan_cross_exchange_opportunities(
     timeout: int = 6
 ) -> List[Dict]:
     """Scan and compute real-time funding rate arbitrage spreads, orderbook liquidity tiers and safe caps."""
+    if {connector_1, connector_2} != {"hyperliquid_perpetual", "binance_perpetual"}:
+        raise ValueError("This scanner supports Binance and Hyperliquid only")
     hl_rates = fetch_hyperliquid_perpetual_funding_rates(timeout=timeout)
     bn_rates = fetch_binance_perpetual_funding_rates(timeout=timeout)
 
@@ -172,7 +183,8 @@ def scan_cross_exchange_opportunities(
             "bn_vol_24h": bn_vol,
             "hl_oi": hl_oi,
             "liquidity_badge": liq_badge,
-            "safe_cap": safe_cap,
+            "safe_cap": "需逐档盘口测算",
+            "volume_based_hint": safe_cap,
             "liq_rank": liq_rank,
         })
 

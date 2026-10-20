@@ -103,9 +103,9 @@ mode_col1, mode_col2 = st.columns([0.45, 0.55])
 with mode_col1:
     trading_mode = st.radio(
         "选择策略运行模式",
-        options=["纸面预演 (Dry Run - 推荐/零风险)", "实盘交易 (Live Trading - 真实下单)"],
+        options=["纸面预演 (Dry Run - 审计版)"],
         index=0,
-        help="纸面预演：使用交易所 100% 真实实时的盘口深度与资金费率在本地沙盒进行模拟套利与收益结算，绝不向交易所发送真实订单，无需配置 API Key。\n实盘交易：真实向交易所下单开仓，需提前配置好 API Key 或钱包私钥。"
+        help="本次审计版仅接受模拟交易。盘口成交与资金费金额仍是模型估算；真实双腿成交、故障补偿与账户对账验收通过后才可开放实盘。"
     )
 is_dry_run = trading_mode.startswith("纸面预演")
 
@@ -114,7 +114,7 @@ with mode_col2:
         st.success("""
         🟢 **纸面预演（Dry Run）模式已激活**
         * **实时真实行情**：通过公共 WebSocket/REST 实时监控 Binance 与 Hyperliquid 的深度与资金费率。
-        * **沙盒虚拟结算**：命中套利阈值时在本地沙盒虚拟开仓，按各交易所真实结算周期自动结算资金费。
+        * **沙盒虚拟结算**：命中套利阈值时在本地沙盒虚拟开仓，按各币种结算周期查询已公布的历史费率；参考价格缺失时明确标记金额估算。
         * **免配密钥**：无需配置 API Key，绝无资金风险。
         """)
     else:
@@ -131,14 +131,6 @@ c_conn1, c_conn2 = st.columns(2)
 perpetual_connectors = [
     "hyperliquid_perpetual",
     "binance_perpetual",
-    "bybit_perpetual",
-    "okx_perpetual",
-    "gate_io_perpetual",
-    "bitget_perpetual",
-    "kucoin_perpetual",
-    "binance_perpetual_testnet",
-    "hyperliquid_perpetual_testnet",
-    "bybit_perpetual_testnet"
 ]
 
 with c_conn1:
@@ -153,7 +145,7 @@ with c_conn2:
         "交易所 2 (Connector 2)",
         options=perpetual_connectors,
         index=1,
-        help="通常推荐选择 Binance 或 Bybit 作为对冲对手所"
+        help="本轮资金费结算审计覆盖 Binance USDT 与 Hyperliquid USD"
     )
 
 if connector_1 == connector_2:
@@ -168,10 +160,10 @@ st.caption("🚀 **主动雷达巡检**：系统自动并发比对 Binance 与 H
 def get_cached_opportunities(c1, c2):
     return scan_cross_exchange_opportunities(c1, c2)
 
-with st.spinner("🔍 正在扫描 Binance 与 Hyperliquid 全市场 200+ 标的实时资金费率..."):
-    live_opps = get_cached_opportunities(connector_1, connector_2)
+with st.spinner("🔍 正在扫描 Binance 与 Hyperliquid 实时资金费率..."):
+    live_opps = get_cached_opportunities(connector_1, connector_2) if connector_1 != connector_2 else []
 
-top_opp_tokens = [o["coin"] for o in live_opps[:5]] if live_opps else ["2Z", "MON", "SAND", "MOODENG", "YGG"]
+top_opp_tokens = [o["coin"] for o in live_opps[:5]] if live_opps else ["BTC", "ETH", "SOL"]
 
 # Render Scanner expander / table
 with st.expander(f"📡 点击展开：全市场实时利差机会排行榜 (已发现 {len(live_opps)} 个共有标的)", expanded=True):
@@ -250,6 +242,10 @@ if custom_tokens_input:
 if not final_tokens:
     st.warning("请至少选择或输入一个监控代币！")
 
+paper_account_balance_quote = st.number_input("模拟账户总资金 (USD 等值；两所各分配一半)", min_value=100.0, value=10000.0, step=100.0)
+paper_margin_reserve_pct = st.slider("各交易所保留资金比例", min_value=0.0, max_value=0.8, value=0.25, step=0.05)
+st.caption("此资金仅用于模拟预算。USDT/USD 按 1:1 估值，未模拟脱锚、排队成交和网络延迟。")
+
 # Step 3: Position, Leverage & Risk Management
 st.markdown("#### 3. 仓位大小、杠杆与风控阈值")
 c_p1, c_p2, c_p3 = st.columns(3)
@@ -258,10 +254,10 @@ with c_p1:
     leverage = st.number_input(
         "目标杠杆倍数 (Target Leverage)",
         min_value=1,
-        max_value=20,
-        value=3,
+        max_value=3,
+        value=1,
         step=1,
-        help="设置合约开仓的目标杠杆。设为 1x 为全额现货级安全对冲（零爆仓风险）；建议 1x~3x。"
+        help="设置模拟永续仓位杠杆（1~3x）。即使 1x，空头单腿也存在强平风险，两所保证金不能自动互相补充。"
     )
     min_leverage_capital_threshold = st.number_input(
         "小额免杠杆安全线 ($)",
@@ -269,7 +265,7 @@ with c_p1:
         max_value=5000.0,
         value=500.0,
         step=50.0,
-        help="当仓位名义金额低于此安全线时，策略自动强制采用 1x 免杠杆安全对冲，杜绝小额资金承担不必要的单腿爆仓与止损摩擦风险。"
+        help="小额仓位采用 1x；仍需独立检查两所保证金和空头风险。"
     )
     position_size_quote = st.number_input(
         "单仓名义价值 (USDT/USD)",
@@ -306,7 +302,7 @@ with c_p3:
     funding_rate_diff_stop_loss = st.number_input(
         "费率倒挂止损阈值 (%)",
         min_value=-5.0,
-        max_value=0.0,
+        max_value=-0.10,
         value=-0.10,
         step=0.02,
         format="%.2f",
@@ -339,7 +335,7 @@ with st.expander("🛡️ 高级风控与防抖防护盾 (Institutional Risk Shi
         max_payback_hours = st.number_input(
             "回本周期硬拦截上限 (小时)",
             min_value=1.0,
-            max_value=72.0,
+            max_value=12.0,
             value=12.0,
             step=1.0,
             help="开仓摩擦成本（双边买卖点差+手续费）按当前费率计算的回本小时数，超过该阈值坚决不开仓（默认 ≤ 12h）。"
@@ -395,7 +391,9 @@ st.subheader("📋 策略配置预览 (Live Configuration Preview)")
 
 config_dict = {
     "script_file_name": "v2_funding_rate_arb.py",
-    "dry_run": bool(is_dry_run),
+    "dry_run": True,
+    "paper_account_balance_quote": float(paper_account_balance_quote),
+    "paper_margin_reserve_pct": float(paper_margin_reserve_pct),
     "timezone": selected_timezone,
     "connectors": [connector_1, connector_2],
     "tokens": final_tokens,
@@ -403,7 +401,7 @@ config_dict = {
     "min_leverage_capital_threshold": float(min_leverage_capital_threshold),
     "position_size_quote": float(position_size_quote),
     "dynamic_position_sizing": bool(dynamic_position_sizing),
-    "max_orderbook_depth_ratio": 0.3,
+    "max_orderbook_depth_ratio": 0.15,
     "min_funding_rate_profitability": float(min_funding_rate_profitability),
     "profitability_to_take_profit": float(profitability_to_take_profit),
     "funding_rate_diff_stop_loss": float(funding_rate_diff_stop_loss),

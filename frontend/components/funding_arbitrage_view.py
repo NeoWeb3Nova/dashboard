@@ -6,7 +6,7 @@ tables, depth analysis charts, and KPI cards from the generic Hummingbot
 instances orchestration page (app.py).
 
 By isolating custom arbitrage logic here, the upstream app.py remains minimally
-invasive, enabling 100% seamless upstream updates without merge conflicts.
+invasive, keeping custom reporting separate from upstream orchestration.
 """
 import json
 import os
@@ -33,6 +33,18 @@ from frontend.components.pnl_analytics import render_institutional_pnl_analytics
 def render_funding_arbitrage_kpi_cards(arb_data, total_volume_traded, total_global_pnl_quote):
     """Render the 4 decoupled accounting KPI cards for Funding Rate Arbitrage bots."""
     active_pos = arb_data.get("active_positions", [])
+    audit = arb_data.get("audit", {})
+    if arb_data.get("is_dry_run"):
+        st.caption("模拟账本：盘口成交、手续费及强平距离为模型估算，不代表真实成交或交易所账户余额。")
+    if audit.get("blocked_reason"):
+        st.error(f"策略暂停新增仓位：{audit['blocked_reason']}")
+    if audit.get("valid_valuation") is False:
+        st.warning("部分持仓行情不可用，下列浮盈亏包含旧估值，不能作为当前可平仓收益。")
+    if any(p.get("funding_pending") for p in active_pos):
+        st.info("部分资金费历史仍在补记；当前净收益可能继续修订。")
+    if arb_data.get("paper_account"):
+        account = arb_data["paper_account"]
+        st.caption(f"模拟总资金 ${float(account['initial_balance']):,.2f} · 模型净值 ${float(account['equity']):,.2f} · 各所可用预算 {account.get('available', {})}")
     closed_trades = arb_data.get("closed_trades", [])
     global_lev = int(arb_data.get("leverage", 3))
 
@@ -43,10 +55,10 @@ def render_funding_arbitrage_kpi_cards(arb_data, total_volume_traded, total_glob
     total_active_net = total_active_unrealized + total_active_funding
 
     real_margin_total = sum(
-        float(p.get("position_size", 0)) * (
+        float(p.get("initial_margin_quote", float(p.get("position_size", 0)) * (
             1.0 / float(p.get("long_leverage", global_lev)) +
             1.0 / float(p.get("short_leverage", global_lev))
-        ) for p in active_pos
+        ))) for p in active_pos
     )
 
     col1, col2, col3, col4 = st.columns(4)
@@ -148,19 +160,19 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
     total_funding_income = sum(float(p.get("funding_income", 0)) for p in active_pos) + sum(float(t.get("funding_pnl", 0)) for t in closed_trades)
     total_unrealized_pnl = sum(float(p.get("unrealized_trading_pnl", 0)) for p in active_pos)
     total_realized_pnl = sum(float(t.get("total_net_pnl", 0)) for t in closed_trades)
-    net_combined_pnl = total_funding_income + total_unrealized_pnl + total_realized_pnl
+    net_combined_pnl = sum(float(p.get("net_pnl", 0)) for p in active_pos) + total_realized_pnl
 
     # Projected 24h funding cashflow
     rate_diff_map = {m.get("token"): float(m.get("daily_rate_diff_pct", 0.0)) for m in market_comp}
-    projected_daily_usd = sum(float(p.get("position_size", 0)) * (rate_diff_map.get(p.get("token"), 0.0) / 100.0) for p in active_pos)
+    projected_daily_usd = sum(float(p.get("projected_daily_funding_quote") or 0) for p in active_pos)
     projected_apr = (projected_daily_usd * 365.0 / total_capital * 100.0) if total_capital > 0 else 0.0
 
     global_leverage = int(arb_data.get("leverage", 3))
     real_margin_total = sum(
-        float(p.get("position_size", 0)) * (
+        float(p.get("initial_margin_quote", float(p.get("position_size", 0)) * (
             1.0 / float(p.get("long_leverage", p.get("leverage", global_leverage))) +
             1.0 / float(p.get("short_leverage", p.get("leverage", global_leverage)))
-        ) for p in active_pos
+        ))) for p in active_pos
     )
     gross_capital = total_capital * 2.0
     effective_leverage = (gross_capital / real_margin_total) if real_margin_total > 0 else float(global_leverage)
@@ -184,7 +196,7 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
         # All positions 1x: Zero leverage / Spot equivalent safe hedging
         m1_delta = f"🛡️ 1x 全额免杠杆 (多空各押 ${single_margin:,.2f})"
         m2_delta = f"🛡️ 1:1 现货级对冲无放大 (单边 ${total_capital:,.2f})"
-        m1_help = f"自适应安全模式：当前全部活跃持仓均采用 1x 全额免杠杆对冲（零强平爆仓风险），多空两所各出资 ${single_margin:,.2f} 全额质押。"
+        m1_help = f"自适应安全模式：当前全部活跃持仓均采用 1x 全额免杠杆对冲（仍有单腿强平风险），多空两所各出资 ${single_margin:,.2f} 全额质押。"
         m2_help = f"全部持仓采用 1x 免杠杆安全对冲，合约名义总货值严格等于实缴总本金（${real_margin_total:,.2f}），没有任何杠杆乘数放大。"
     elif len(unique_levs) == 1 and unique_levs[0] > 1:
         # All positions share the exact same leverage (e.g. 2x, 3x)
@@ -200,7 +212,7 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
         if has_1x:
             m1_delta = f"动态加权 {effective_leverage:.1f}x (含 1x免杠杆仓)"
             m2_delta = f"总本金×{effective_leverage:.1f}x 综合放大 (单边 ${total_capital:,.2f})"
-            m1_help = f"自适应动态杠杆生效中：当前持仓组合包含 {lev_tags} 多种杠杆配置。小额资金标的自动降为 1x 免杠杆以消除爆仓风险，大额资金采用目标杠杆增效，全组合综合加权有效杠杆为 {effective_leverage:.1f}x（多空两所各押 ${single_margin:,.2f}）。"
+            m1_help = f"自适应动态杠杆生效中：当前持仓组合包含 {lev_tags} 多种杠杆配置。小额资金标的自动降为 1x 免杠杆以降低保证金占用风险，大额资金采用目标杠杆增效，全组合综合加权有效杠杆为 {effective_leverage:.1f}x（多空两所各押 ${single_margin:,.2f}）。"
             m2_help = f"双边合约总名义资产 = 实缴总本金 (${real_margin_total:,.2f}) × 综合加权 {effective_leverage:.1f}x 杠杆放大（包含 1x 免杠杆安全仓与加速仓）；单边对冲敞口为 ${total_capital:,.2f}。"
         else:
             m1_delta = f"动态加权 {effective_leverage:.1f}x (混合 {lev_tags})"
@@ -211,7 +223,7 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
     col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns(5)
     with col_m1:
         st.metric(
-            "💼 真实实缴本金 (总保证金)",
+            "💼 持仓保证金 (模型估算)",
             f"${real_margin_total:,.2f}",
             m1_delta,
             help=m1_help
@@ -498,14 +510,23 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                 locked_pnl = float(p.get("locked_tp_pnl", 0.0))
                 pos_size = float(p.get('position_size', 0))
                 net_pnl = float(p.get('net_pnl', 0))
-                if partial_done:
-                    tp_badge = f"⚡ 已锁定50%利润 (+${locked_pnl:.2f}) | 目标 +2.0% 终极平仓"
+                take_profit = float(arb_data.get('profitability_to_take_profit', 0.02))
+                partial_ratio = float(arb_data.get('partial_tp_ratio', 0.5))
+                partial_threshold = float(arb_data.get('partial_tp_threshold_pct', 0.01))
+                if not arb_data.get('scaling_tp_enabled', True):
+                    tp_badge = f"净收益目标 {take_profit:.2%}（含模型费用）"
+                elif partial_done:
+                    tp_badge = f"⚡ 已减仓 {partial_ratio:.0%}，该部分净损益 ${locked_pnl:+.2f} | 剩余目标 {take_profit:.2%}"
                 else:
-                    target_stage1 = pos_size * 0.010
+                    target_stage1 = pos_size * partial_threshold
                     gap_stage1 = max(0.0, target_stage1 - net_pnl)
-                    tp_badge = f"⏳ 阶段1: +1.0% (差 ${gap_stage1:.2f} 锁50%)"
+                    tp_badge = f"⏳ 阶段1: {partial_threshold:.2%} (差 ${gap_stage1:.2f}，计划减仓 {partial_ratio:.0%})"
                 single_long_margin = pos_size / long_lev if long_lev > 0 else pos_size / 3.0
                 single_short_margin = pos_size / short_lev if short_lev > 0 else pos_size / 3.0
+                long_i = 1 if p.get('side') == 'BUY' else 2
+                short_i = 3 - long_i
+                single_long_margin = float(p.get(f'initial_margin_{long_i}_quote', single_long_margin))
+                single_short_margin = float(p.get(f'initial_margin_{short_i}_quote', single_short_margin))
                 real_margin = single_long_margin + single_short_margin
                 token_sym = p.get('token', '')
                 coin_amt_str = f"{pos_size / long_p:,.0f} {token_sym}" if long_p > 0 else "N/A"
@@ -658,7 +679,7 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                             elif item['long_lev'] == 1 and item['short_lev'] == 1:
                                 lev_badge_html = (
                                     f"<span style='font-size:12px; background:#064e3b; border:1px solid #059669; padding:3px 8px; border-radius:4px; color:#34d399; font-weight:600;'>"
-                                    f"🛡️ 1x 全额免杠杆安全对冲 (零爆仓风险)</span>"
+                                    f"🛡️ 1x 全额免杠杆安全对冲 (仍有单腿强平风险)</span>"
                                 )
                             else:
                                 lev_badge_html = (
@@ -709,7 +730,7 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                             st.markdown("##### 💼 资金规模与开仓杠杆")
                             if item['long_lev'] == 1 and item['short_lev'] == 1:
                                 card_gross_sub = f"*(1:1 现货级免杠杆，实缴本金 `${item['real_margin']:,.2f}` 全额对冲)*"
-                                card_lev_desc = f"🛡️ **1x 全额免杠杆** *(小额资金安全模式，零强平爆仓风险)*"
+                                card_lev_desc = f"🛡️ **1x 全额免杠杆** *(小额资金安全模式，仍有单腿强平风险)*"
                             elif item['long_lev'] == item['short_lev']:
                                 card_gross_sub = f"*(实缴本金 `${item['real_margin']:,.2f}` × {item['long_lev']}x 杠杆放大)*"
                                 card_lev_desc = f"⚡ **多空统一 `{item['long_lev']}x` 杠杆** *(大额资金增效模式)*"
@@ -788,7 +809,7 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                   许多人会有疑问：“开仓时有价差，平仓时又有价差，如果价差扩大，这个成本到底在哪里体现？”  
                   **答案是：系统每 10 秒刷新的「盘口浮盈亏」，计算的就是这个双边价差变动（基差漂移）！**  
                   $$\\text{盘口浮盈亏} = \\underbrace{(P_{\\text{卖,现}} - P_{\\text{买,开}}) \\times Q}_{\\text{多头腿损益}} + \\underbrace{(P_{\\text{卖,开}} - P_{\\text{买,现}}) \\times Q}_{\\text{空头腿损益}} = \\mathbf{\\Big[ \\Delta_{\\text{开仓两所价差}} - \\Delta_{\\text{平仓两所价差}} \\Big] \\times Q}$$  
-                  * **价差扩大**：如果平仓时两所价差朝着不利方向扩大，多空两腿对冲后损益会暂时为负，**完全实时体现在“盘口浮亏”里，一分钱都不会漏算**；  
+                  * **价差扩大**：如果平仓时两所价差朝着不利方向扩大，多空两腿对冲后损益会暂时为负，**完全实时体现在“盘口浮亏”里，仍需检查估值状态与尚未补记的资金费**；
                   * **价差收窄**：随着两所套利资金抹平基差，价差回归到 0，多空对冲损益就会回归到 0；  
                   * **全订单簿深度滑点预扣**：系统并非按理想中间价测算，而是调用了深度撮合算法（VWAP），**把此时此刻市价吃单的真实冲击滑点全部直接算进了成本**！
                 * **6. 为什么刚结算一次资金费，累计已收资金费反而是负的？违背开仓条件了吗？**  

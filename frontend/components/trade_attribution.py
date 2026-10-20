@@ -41,10 +41,10 @@ def analyze_trade_attribution(trade: Dict[str, Any], tz_label: str = "北京时�
     funding_pnl = float(trade.get("funding_pnl", 0.0))
     total_net_pnl = float(trade.get("total_net_pnl", trading_pnl + funding_pnl))
     
-    pos_size = float(trade.get("position_size", 10000.0))
+    pos_size = float(trade.get("position_size", trade.get("position_size_quote", 0)))
     leverage = int(trade.get("leverage", 3))
     # 双边实缴保证金总额 = 2 * 单边名义货值 / 杠杆
-    real_margin = (2.0 * pos_size) / leverage if leverage > 0 else pos_size
+    real_margin = float(trade.get("initial_margin_quote", (2.0 * pos_size) / leverage if leverage > 0 else 0))
     roe_pct = (total_net_pnl / real_margin) * 100.0 if real_margin > 0 else 0.0
     
     dur_days = max(dur_sec / 86400.0, 1.0 / 24.0)
@@ -56,10 +56,10 @@ def analyze_trade_attribution(trade: Dict[str, Any], tz_label: str = "北京时�
     if is_win:
         if funding_pnl > 0 and (funding_pnl >= abs(trading_pnl) or trading_pnl <= 0):
             attr_tag = "💰 资金费丰厚覆盖摩擦获利"
-            summary_reason = f"【{token}】利息现金流不仅完全消化了开平仓滑点与手续费，还锁定了稳健正收益。"
+            summary_reason = f"【{token}】利息现金流不仅完全消化了开平仓滑点与手续费，还锁定了本笔账面正收益。"
             detail_explanation = (
                 f"【资金费红利驱动】：在 **{token}** 持仓的 {dur_str} 期间，策略稳定收割资金费现金流，"
-                f"累计净入账 +${funding_pnl:,.4f}。该利息现金流完全覆盖并超越了平仓价差损耗及手续费摩擦（-${abs(trading_pnl):,.4f}），"
+                f"累计净入账 +${funding_pnl:,.4f}。账面资金费超过了交易损益净损耗（交易损益已包含模型计入的成本）（-${abs(trading_pnl):,.4f}），"
                 f"最终实现净利润 +${total_net_pnl:,.4f}（实缴本金 ROE: {roe_pct:+.2f}%）。"
             )
         elif trading_pnl > 0:
@@ -76,7 +76,7 @@ def analyze_trade_attribution(trade: Dict[str, Any], tz_label: str = "北京时�
             summary_reason = f"【{token}】总收益率达到预设目标，策略自动双边对冲平仓落袋。"
             detail_explanation = (
                 f"【止盈线达标退出】：标的 **{token}** 累计净收益达到策略设定的止盈阈值，"
-                f"机器人自动以最优市价挂单平仓，锁定净利润 +${total_net_pnl:,.4f}。"
+                f"账本记录该仓位以模拟/实际成交价格平仓，锁定净利润 +${total_net_pnl:,.4f}。"
             )
     else:
         if "Breakeven" in close_reason:

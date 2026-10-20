@@ -39,9 +39,9 @@ def _parse_trades_dataframe(closed_trades: List[Dict[str, Any]], active_tz: str 
         f_pnl = float(t.get("funding_pnl", 0.0))
         net_pnl = float(t.get("total_net_pnl", t_pnl + f_pnl))
 
-        pos_size = float(t.get("position_size", 10000.0))
+        pos_size = float(t.get("position_size", t.get("position_size_quote", 0)))
         leverage = int(t.get("leverage", 3))
-        real_margin = (2.0 * pos_size) / leverage if leverage > 0 else pos_size
+        real_margin = float(t.get("initial_margin_quote", (2.0 * pos_size) / leverage if leverage > 0 else 0))
         roe_pct = (net_pnl / real_margin) * 100.0 if real_margin > 0 else 0.0
 
         records.append({
@@ -126,7 +126,7 @@ def _calculate_pnl_metrics(df: pd.DataFrame, active_pos: List[Dict[str, Any]]) -
 
     # Calculate Max Drawdown from Cumulative Net PnL curve
     df["cum_net"] = df["net_pnl"].cumsum()
-    df["peak"] = df["cum_net"].cummax()
+    df["peak"] = df["cum_net"].cummax().clip(lower=0)
     df["drawdown"] = df["cum_net"] - df["peak"]
     max_dd_usd = abs(df["drawdown"].min()) if not df.empty else 0.0
 
@@ -331,7 +331,7 @@ def _render_equity_curve_chart(df: pd.DataFrame, bot_name: str):
     plot_df["cum_net"] = plot_df["net_pnl"].cumsum()
     plot_df["cum_funding"] = plot_df["funding_pnl"].cumsum()
     plot_df["cum_trade"] = plot_df["trading_pnl"].cumsum()
-    plot_df["high_watermark"] = plot_df["cum_net"].cummax()
+    plot_df["high_watermark"] = plot_df["cum_net"].cummax().clip(lower=0)
 
     fig = go.Figure()
 
@@ -596,14 +596,14 @@ def render_institutional_pnl_analytics(arb_data: Dict[str, Any], bot_name: str, 
     ctrl_c1, ctrl_c2 = st.columns([2.5, 1.5])
     with ctrl_c1:
         regime_mode = st.radio(
-            "🛡️ 历史账本净化透视",
+            "历史账本与事后筛选",
             [
                 f"🌐 全量历史真实账本 (含早期试错旧币, 共 {len(closed_trades)} 笔)",
-                f"✨ 剔除永久黑名单毒币 (排除 BERA/2Z/BLUR/RSR/MOODENG, 真实造血能力)",
+                "事后剔除当前黑名单（假设子集，不代表策略实绩）",
             ],
             horizontal=True,
             key=f"regime_mode_{bot_name}",
-            help="选择是否剔除已被终生熔断拉黑的 5 大微盘毒币，以看清当前健康策略的真实长期盈利基准"
+            help="默认展示全部历史损益。事后剔除亏损资产存在选择偏差，不能证明当时可以避免亏损或未来盈利。"
         )
     with ctrl_c2:
         timeframe_sel = st.selectbox(
@@ -619,6 +619,9 @@ def render_institutional_pnl_analytics(arb_data: Dict[str, Any], bot_name: str, 
         df = raw_df[~raw_df["token"].isin(perm_bl_tokens)].copy() if not raw_df.empty else raw_df
     else:
         df = raw_df
+
+    if "剔除" in regime_mode:
+        st.warning("当前为事后筛选的假设子集。累计真实/模拟总损益仍以全量账本为准；筛选不回写历史。")
 
     # Calculate metrics
     metrics = _calculate_pnl_metrics(df, active_pos)
