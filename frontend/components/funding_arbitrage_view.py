@@ -329,13 +329,95 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                     })
                 st.dataframe(pd.DataFrame(tp_rows), use_container_width=True, hide_index=True)
 
-    # --- Section B: 5 Multi-Dimensional Tabs ---
+    # --- Section B: 5 Multi-Dimensional High-Visibility Tabs ---
+    st.markdown("""
+    <style>
+    /* === Institutional High-Contrast Segmented Tabs Navigation === */
+    div[data-testid="stTabs"] {
+        margin-top: 10px;
+    }
+
+    div[data-testid="stTabs"] [data-baseweb="tab-list"] {
+        background: linear-gradient(180deg, rgba(30, 41, 59, 0.95) 0%, rgba(15, 23, 42, 0.98) 100%) !important;
+        backdrop-filter: blur(16px) !important;
+        -webkit-backdrop-filter: blur(16px) !important;
+        padding: 8px 12px !important;
+        border-radius: 16px !important;
+        border: 1.5px solid rgba(56, 189, 248, 0.4) !important;
+        box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.2) !important;
+        gap: 10px !important;
+        display: flex !important;
+        flex-wrap: wrap !important;
+    }
+
+    div[data-testid="stTabs"] button[data-baseweb="tab"] {
+        height: 50px !important;
+        padding: 0 22px !important;
+        border-radius: 12px !important;
+        background: rgba(30, 41, 59, 0.8) !important;
+        border: 1px solid rgba(255, 255, 255, 0.12) !important;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+        transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
+        cursor: pointer !important;
+    }
+
+    div[data-testid="stTabs"] button[data-baseweb="tab"] div[data-testid="stMarkdownContainer"] p {
+        font-size: 15px !important;
+        font-weight: 600 !important;
+        color: #cbd5e1 !important;
+        letter-spacing: 0.02em !important;
+        margin: 0 !important;
+        transition: color 0.2s ease !important;
+    }
+
+    div[data-testid="stTabs"] button[data-baseweb="tab"]:hover {
+        background: rgba(51, 65, 85, 0.95) !important;
+        border-color: rgba(56, 189, 248, 0.6) !important;
+        transform: translateY(-2px) !important;
+        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4) !important;
+    }
+
+    div[data-testid="stTabs"] button[data-baseweb="tab"]:hover div[data-testid="stMarkdownContainer"] p {
+        color: #ffffff !important;
+    }
+
+    div[data-testid="stTabs"] button[data-baseweb="tab"][aria-selected="true"] {
+        background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%) !important;
+        border: 2px solid #38bdf8 !important;
+        box-shadow: 0 0 22px rgba(56, 189, 248, 0.5), inset 0 1px 1px rgba(255, 255, 255, 0.35) !important;
+        transform: scale(1.02) !important;
+    }
+
+    div[data-testid="stTabs"] button[data-baseweb="tab"][aria-selected="true"] div[data-testid="stMarkdownContainer"] p {
+        color: #ffffff !important;
+        font-weight: 700 !important;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4) !important;
+    }
+
+    /* Hide default thin red underline */
+    div[data-testid="stTabs"] [data-baseweb="tab-highlight"],
+    div[data-testid="stTabs"] [data-baseweb="tab-border"] {
+        display: none !important;
+        height: 0 !important;
+    }
+    </style>
+    <div style="background: linear-gradient(90deg, rgba(2, 132, 199, 0.2) 0%, rgba(15, 23, 42, 0.0) 100%); border-left: 4px solid #38bdf8; padding: 12px 18px; border-radius: 0 12px 12px 0; margin-top: 24px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between;">
+        <div>
+            <span style="font-size: 18px; font-weight: 700; color: #f8fafc; letter-spacing: 0.02em;">🧭 策略功能与多维战绩导航中心</span>
+            <span style="font-size: 13px; color: #94a3b8; margin-left: 14px;">（点击下方专属发光大按钮，即可秒级切换 5 大核心模块）</span>
+        </div>
+        <span style="font-size: 12px; font-weight: 600; color: #38bdf8; background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.4); padding: 4px 12px; border-radius: 20px;">
+            💡 高亮选中有发光立体边框
+        </span>
+    </div>
+    """, unsafe_allow_html=True)
+
     tab_pos, tab_pnl, tab_closed, tab_rates, tab_charts = st.tabs([
-        f"📈 活跃多空持仓 ({len(active_pos)})",
-        "📊 机构级盈亏全景分析",
-        f"📜 历史平仓成交 ({len(closed_trades)})",
-        f"🌐 实时费率与利差监控 ({len(market_comp)})",
-        "🔬 盘口深度与流动性透视"
+        f"📈 活跃多空持仓  [{len(active_pos)} 仓位]",
+        "📊 机构级盈亏全景  [每日/每周/月历]",
+        f"📜 历史平仓成交  [{len(closed_trades)} 笔明细]",
+        f"🌐 实时费率利差  [{len(market_comp)} 币雷达]",
+        "🔬 盘口深度与流动性  [容量分析]"
     ])
 
     with tab_pos:
