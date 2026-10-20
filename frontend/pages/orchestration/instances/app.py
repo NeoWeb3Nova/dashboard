@@ -152,27 +152,114 @@ def render_bot_card(bot_name):
                 error_logs = bot_data.get("error_logs", [])
                 general_logs = bot_data.get("general_logs", [])
 
-                # Bot header
-                col1, col2, col3 = st.columns([2, 1, 1])
-                with col1:
-                    if is_running:
-                        st.success(f"🤖 **{bot_name}** - Running")
-                    else:
-                        st.warning(f"🤖 **{bot_name}** - Stopped")
+                # Early fetch funding rate arbitrage & basis stat arb data
+                is_funding_arb_bot, arb_data = get_bot_funding_arbitrage_data(bot_name, performance)
+                is_basis_arb_bot, basis_data = get_bot_basis_stat_arb_data(bot_name, performance)
 
-                with col3:
-                    if is_running:
-                        if st.button("⏹️ Stop", key=f"stop_{bot_name}", use_container_width=True):
-                            stop_bot(bot_name)
+                if is_basis_arb_bot:
+                    strategy_badge = "⚡ 基差统计双击流"
+                    badge_style = "background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.4); color: #38bdf8;"
+                elif is_funding_arb_bot:
+                    strategy_badge = "💰 纯资金费率套利"
+                    badge_style = "background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); color: #10b981;"
+                else:
+                    strategy_badge = "🤖 通用策略"
+                    badge_style = "background: rgba(168, 85, 247, 0.15); border: 1px solid rgba(168, 85, 247, 0.4); color: #c084fc;"
+
+                # Expand / Collapse session state tracking
+                expand_key = f"bot_expand_state_{bot_name}"
+                if expand_key not in st.session_state:
+                    st.session_state[expand_key] = True
+                is_expanded = st.session_state[expand_key]
+
+                # Bot header
+                col_head, col_btns = st.columns([3, 2])
+                with col_head:
+                    status_dot = "🟢" if is_running else "🟡"
+                    status_label = "Running" if is_running else "Stopped"
+                    status_color = "#10b981" if is_running else "#f59e0b"
+                    st.markdown(
+                        f"<div style='display:flex;align-items:center;gap:8px;padding-top:4px;'>"
+                        f"<span style='{badge_style};padding:3px 8px;border-radius:6px;font-size:0.8rem;font-weight:700;'>{strategy_badge}</span>"
+                        f"<span style='font-size:1.15rem;font-weight:700;color:#f8fafc;'>{bot_name}</span>"
+                        f"<span style='font-size:0.85rem;font-weight:600;color:{status_color};'>({status_dot} {status_label})</span>"
+                        f"</div>",
+                        unsafe_allow_html=True
+                    )
+
+                with col_btns:
+                    col_b1, col_b2 = st.columns(2)
+                    with col_b1:
+                        toggle_btn_text = "🔼 收起折叠" if is_expanded else "🔽 点击展开"
+                        toggle_btn_help = "收起当前策略卡片为紧凑概览条，节省纵向空间" if is_expanded else "展开查看完整持仓、套利监控雷达与订单深度"
+                        if st.button(toggle_btn_text, key=f"toggle_expand_{bot_name}", use_container_width=True, help=toggle_btn_help):
+                            st.session_state[expand_key] = not is_expanded
+                            st.rerun()
+
+                    with col_b2:
+                        if is_running:
+                            if st.button("⏹️ Stop", key=f"stop_{bot_name}", use_container_width=True, help="停止此容器实例"):
+                                stop_bot(bot_name)
+                        else:
+                            if st.button("📦 Archive", key=f"archive_{bot_name}", use_container_width=True, help="归档此容器实例"):
+                                archive_bot(bot_name)
+
+                # COLLAPSED EXECUTIVE SUMMARY STRIP (80px compact view)
+                if not is_expanded:
+                    st.markdown("<hr style='margin: 8px 0 12px 0; border: none; border-top: 1px solid rgba(255,255,255,0.08);'>", unsafe_allow_html=True)
+                    if is_funding_arb_bot and arb_data:
+                        active_pos = arb_data.get("active_positions", [])
+                        closed_trades = arb_data.get("closed_trades", [])
+                        c_realized = sum(float(t.get("total_net_pnl", 0)) for t in closed_trades)
+                        c_floating_unreal = sum(float(p.get("unrealized_trading_pnl", 0)) for p in active_pos)
+                        c_floating_funding = sum(float(p.get("funding_income", 0)) for p in active_pos)
+                        c_total_funding = c_floating_funding + sum(float(t.get("funding_pnl", 0)) for t in closed_trades)
+                        c_net = c_realized + c_floating_unreal + c_floating_funding
+
+                        c1, c2, c3, c4 = st.columns(4)
+                        with c1:
+                            st.metric("持仓状态", f"{len(active_pos)} 笔活跃", f"已结 {len(closed_trades)} 笔", help="当前持仓对冲与历史平仓笔数")
+                        with c2:
+                            st.metric("累计资金费利息", f"+${c_total_funding:,.2f}", help="真金白银已到账不可逆利息总和")
+                        with c3:
+                            st.metric("已平仓锁定利润", f"${c_realized:+,.2f}", help="完全闭环平仓的历史交易最终净利润")
+                        with c4:
+                            st.metric("综合预估总净值", f"${c_net:+,.2f}", f"持仓浮动 ${c_floating_unreal + c_floating_funding:+,.2f}", help="已实现利润 + 当前活跃仓位假想平仓净值")
+
+                    elif is_basis_arb_bot and basis_data:
+                        active_pos = basis_data.get("active_positions", [])
+                        closed_trades = basis_data.get("closed_trades", [])
+                        radar_pairs = basis_data.get("market_comparison", [])
+                        c_realized = sum(float(t.get("total_net_pnl", 0)) for t in closed_trades)
+                        c_floating_unreal = sum(float(p.get("unrealized_trading_pnl", 0)) for p in active_pos)
+                        c_floating_funding = sum(float(p.get("funding_income", 0)) for p in active_pos)
+                        c_net = c_realized + c_floating_unreal + c_floating_funding
+
+                        c1, c2, c3, c4 = st.columns(4)
+                        with c1:
+                            st.metric("市场雷达监控", f"{len(radar_pairs)} 对标的", "双所微观基差与深度实时跟踪", help="实时监控的 Binance vs Hyperliquid 现货/永续基差币对")
+                        with c2:
+                            st.metric("活跃基差套利仓", f"{len(active_pos)} 笔活跃", f"已结 {len(closed_trades)} 笔", help="当前基差均值回归套利持仓")
+                        with c3:
+                            st.metric("已平仓锁定利润", f"${c_realized:+,.2f}", help="均值回归完成后已锁定的净收益")
+                        with c4:
+                            st.metric("综合预估总净值", f"${c_net:+,.2f}", f"持仓浮动 ${c_floating_unreal + c_floating_funding:+,.2f}")
+
                     else:
-                        if st.button("📦 Archive", key=f"archive_{bot_name}", use_container_width=True):
-                            archive_bot(bot_name)
+                        c1, c2, c3, c4 = st.columns(4)
+                        with c1:
+                            st.metric("运行状态", "🟢 正常" if is_running else "🟡 停止")
+                        with c2:
+                            st.metric("控制器数量", f"{len(controller_configs)} 个")
+                        with c3:
+                            st.metric("错误日志", f"{len(error_logs)} 条")
+                        with c4:
+                            st.metric("常规日志", f"{len(general_logs)} 条")
+
+                    st.caption("💡 此策略卡片已收起折叠（节省纵向滚动空间）。若需查看持仓明细、监控雷达、收益图表与系统日志，请点击右上角「🔽 点击展开」。")
+                    return
 
                 if is_running:
-                    # Early fetch funding rate arbitrage & basis stat arb data if applicable
-                    is_funding_arb_bot, arb_data = get_bot_funding_arbitrage_data(bot_name, performance)
-                    is_basis_arb_bot, basis_data = get_bot_basis_stat_arb_data(bot_name, performance)
-
                     # Calculate totals
                     active_controllers = []
                     stopped_controllers = []
@@ -461,6 +548,14 @@ def render_bot_card(bot_name):
                         else:
                             st.info("No general logs available.")
 
+                # Bottom collapse shortcut to avoid scrolling back up
+                st.markdown("<div style='margin-top: 14px;'></div>", unsafe_allow_html=True)
+                col_bf1, col_bf2 = st.columns([4, 1])
+                with col_bf2:
+                    if st.button("🔼 收起此策略卡片", key=f"foot_collapse_{bot_name}", use_container_width=True, help="收起当前策略卡片"):
+                        st.session_state[expand_key] = False
+                        st.rerun()
+
     except Exception as e:
         with st.container(border=True):
             st.error(f"🤖 **{bot_name}** - Error")
@@ -517,9 +612,75 @@ def show_bot_instances():
                 else:
                     status_placeholder.warning("⏸️ Auto-refresh paused. Click 'Refresh Now' to resume.")
 
-                # Render each bot
-                for bot_name in truly_active_bots.keys():
-                    render_bot_card(bot_name)
+                # Classify running bots by strategy type
+                basis_bots = [b for b in truly_active_bots.keys() if "basis" in b.lower()]
+                funding_bots = [b for b in truly_active_bots.keys() if "funding" in b.lower()]
+                other_bots = [b for b in truly_active_bots.keys() if b not in basis_bots and b not in funding_bots]
+
+                filter_options = [
+                    "🗂️ 平铺全部策略",
+                    "⚡ 基差统计双击流",
+                    "💰 纯资金费率套利",
+                ]
+                if other_bots:
+                    filter_options.append("🤖 其他策略实例")
+
+                def format_filter_label(opt):
+                    if "基差" in opt:
+                        return f"{opt} ({len(basis_bots)})"
+                    elif "资金" in opt:
+                        return f"{opt} ({len(funding_bots)})"
+                    elif "其他" in opt:
+                        return f"{opt} ({len(other_bots)})"
+                    else:
+                        return f"{opt} ({len(truly_active_bots)})"
+
+                # Navigation & Action Dock
+                st.markdown("<div style='margin-top: 10px; margin-bottom: 4px;'></div>", unsafe_allow_html=True)
+                col_filter, col_actions = st.columns([3, 2])
+                with col_filter:
+                    current_filter = st.radio(
+                        "策略视图筛选",
+                        options=filter_options,
+                        format_func=format_filter_label,
+                        horizontal=True,
+                        label_visibility="collapsed",
+                        key="instances_strategy_filter",
+                    )
+
+                with col_actions:
+                    col_a1, col_a2 = st.columns(2)
+                    with col_a1:
+                        if st.button("🔽 全部展开", key="expand_all_instances", use_container_width=True, help="一键展开所有策略卡片的完整明细"):
+                            for b in truly_active_bots.keys():
+                                st.session_state[f"bot_expand_state_{b}"] = True
+                            st.rerun()
+                    with col_a2:
+                        if st.button("🔼 全部收起", key="collapse_all_instances", use_container_width=True, help="一键折叠所有策略卡片为紧凑概览条，消除垂直滚动"):
+                            for b in truly_active_bots.keys():
+                                st.session_state[f"bot_expand_state_{b}"] = False
+                            st.rerun()
+
+                # Determine which bots to display based on selected filter
+                if "基差" in current_filter:
+                    visible_bots = basis_bots
+                    empty_msg = "当前暂无运行中的【基差统计双击流】实例。可前往「Config Generators -> Basis Stat Arb」快速配置启动。"
+                elif "资金" in current_filter:
+                    visible_bots = funding_bots
+                    empty_msg = "当前暂无运行中的【纯资金费率套利】实例。"
+                elif "其他" in current_filter:
+                    visible_bots = other_bots
+                    empty_msg = "当前暂无其他运行中的策略实例。"
+                else:
+                    visible_bots = list(truly_active_bots.keys())
+                    empty_msg = "暂无活跃实例。"
+
+                if visible_bots:
+                    # Render each visible bot
+                    for bot_name in visible_bots:
+                        render_bot_card(bot_name)
+                else:
+                    st.info(empty_msg)
             else:
                 status_placeholder.info("No active bot instances found. Deploy a bot to see it here.")
         else:
