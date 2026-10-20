@@ -45,6 +45,10 @@ from frontend.components.funding_arbitrage_view import (
     render_funding_arbitrage_kpi_cards,
     render_funding_arbitrage_tables,
 )
+from frontend.components.basis_stat_arb_view import (
+    get_bot_basis_stat_arb_data,
+    render_basis_stat_arb_tables,
+)
 from frontend.components.timezone_utils import format_timestamp
 
 
@@ -165,8 +169,9 @@ def render_bot_card(bot_name):
                             archive_bot(bot_name)
 
                 if is_running:
-                    # Early fetch funding rate arbitrage data if applicable
+                    # Early fetch funding rate arbitrage & basis stat arb data if applicable
                     is_funding_arb_bot, arb_data = get_bot_funding_arbitrage_data(bot_name, performance)
+                    is_basis_arb_bot, basis_data = get_bot_basis_stat_arb_data(bot_name, performance)
 
                     # Calculate totals
                     active_controllers = []
@@ -177,8 +182,8 @@ def render_bot_card(bot_name):
                     total_unrealized_pnl_quote = 0.0
 
                     for controller, inner_dict in performance.items():
-                        if controller == "funding_rate_arb":
-                            # Accumulate funding rate arbitrage performance into top-level totals
+                        if controller in ("funding_rate_arb", "basis_stat_arb"):
+                            # Accumulate arbitrage performance into top-level totals
                             arb_perf = inner_dict.get("performance", {})
                             total_global_pnl_quote += float(arb_perf.get("global_pnl_quote", 0.0))
                             total_unrealized_pnl_quote += float(arb_perf.get("unrealized_pnl_quote", 0.0))
@@ -265,9 +270,12 @@ def render_bot_card(bot_name):
                             if total_volume_traded < min_expected_vol:
                                 total_volume_traded = min_expected_vol
 
-                    # Calculate detailed breakdown for funding arbitrage bots
-                    if is_funding_arb_bot and arb_data:
+                    # Calculate detailed breakdown for basis stat arb or funding arbitrage bots
+                    if is_basis_arb_bot and basis_data:
+                        render_basis_stat_arb_tables(basis_data, bot_name)
+                    elif is_funding_arb_bot and arb_data:
                         render_funding_arbitrage_kpi_cards(arb_data, total_volume_traded, total_global_pnl_quote)
+                        render_funding_arbitrage_tables(arb_data, bot_name)
                     else:
                         total_global_pnl_pct = total_global_pnl_quote / total_volume_traded if total_volume_traded > 0 else 0
 
@@ -282,10 +290,6 @@ def render_bot_card(bot_name):
                             st.metric("📊 NET PNL (%)", f"{total_global_pnl_pct:+.2%}")
                         with col4:
                             st.metric("💸 Volume Traded", f"${total_volume_traded:,.2f}")
-
-                    # Funding Rate Arbitrage Visual Section
-                    if is_funding_arb_bot:
-                        render_funding_arbitrage_tables(arb_data, bot_name)
 
                     # Active Controllers
                     if active_controllers:
@@ -366,7 +370,10 @@ def render_bot_card(bot_name):
                 else:
                     # For stopped bots, still show historical arbitrage data if present
                     is_funding_arb_bot, arb_data = get_bot_funding_arbitrage_data(bot_name, performance)
-                    if is_funding_arb_bot and (arb_data.get("closed_trades") or arb_data.get("active_positions")):
+                    is_basis_arb_bot, basis_data = get_bot_basis_stat_arb_data(bot_name, performance)
+                    if is_basis_arb_bot and (basis_data.get("closed_trades") or basis_data.get("active_positions")):
+                        render_basis_stat_arb_tables(basis_data, bot_name)
+                    elif is_funding_arb_bot and (arb_data.get("closed_trades") or arb_data.get("active_positions")):
                         render_funding_arbitrage_tables(arb_data, bot_name)
 
                 # Logs sections (available for both running and stopped bots)

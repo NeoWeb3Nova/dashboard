@@ -17,6 +17,7 @@ def public_pages():
             st.Page("frontend/pages/config/supertrend_v1/app.py", title="SuperTrend V1", icon="👨‍🔬", url_path="supertrend_v1"),
             st.Page("frontend/pages/config/xemm_controller/app.py", title="XEMM Controller", icon="⚡️", url_path="xemm_controller"),
             st.Page("frontend/pages/config/funding_rate_arb/app.py", title="Funding Rate Arb", icon="💰", url_path="funding_rate_arb"),
+            st.Page("frontend/pages/config/basis_stat_arb/app.py", title="Basis Stat Arb", icon="⚡", url_path="basis_stat_arb"),
         ],
         "Data": [
             st.Page("frontend/pages/data/download_candles/app.py", title="Download Candles", icon="💹", url_path="download_candles"),

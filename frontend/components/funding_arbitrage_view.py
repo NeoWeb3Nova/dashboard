@@ -121,7 +121,11 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
 
     col_hdr_title, col_hdr_clock, col_hdr_tz = st.columns([2.8, 1.1, 1.1])
     with col_hdr_title:
-        st.markdown(f"#### 💰 资金费率套利持仓与量化透视 `{mode_badge}`")
+        st.markdown(
+            f"#### 💰 资金费率套利持仓与量化透视 `{mode_badge}` &nbsp; "
+            f'<span style="font-size: 0.75rem; color: #94a3b8; font-weight: normal;">| 姐妹策略：<a href="/basis_stat_arb" target="_self" style="color: #60a5fa; text-decoration: none;">⚡ 基差统计双击流</a> (独立运行)</span>',
+            unsafe_allow_html=True
+        )
     with col_hdr_clock:
         clock_health = get_exchange_clock_health()
         st.caption(f"{clock_health.get('badge', '⏱️ 时钟正常')}")
