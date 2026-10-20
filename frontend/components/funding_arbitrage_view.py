@@ -1444,12 +1444,17 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
 
 def get_bot_funding_arbitrage_data(bot_name, performance):
     """Retrieve funding arbitrage custom_info from MQTT performance or local disk."""
+    # Strict Isolation Guard: basis stat arb bots can NEVER be matched as funding bots
+    if "basis" in bot_name.lower() or "basis_stat_arb" in performance:
+        return False, None
+
     arb_data = None
     for ctrl_id, ctrl_dict in performance.items():
-        c_info = ctrl_dict.get("custom_info", {})
-        if "active_positions" in c_info or "closed_trades" in c_info or "market_comparison" in c_info:
-            arb_data = c_info
-            break
+        if ctrl_id == "funding_rate_arb":
+            c_info = ctrl_dict.get("custom_info", {})
+            if "active_positions" in c_info or "closed_trades" in c_info or "market_comparison" in c_info:
+                arb_data = c_info
+                break
 
     # Search for local_json across multiple possible root configurations
     candidate_json_paths = [
@@ -1471,7 +1476,7 @@ def get_bot_funding_arbitrage_data(bot_name, performance):
     is_funding_arb_bot = (
         "funding" in bot_name.lower() or 
         "funding_rate_arb" in performance or 
-        arb_data is not None
+        (arb_data is not None and arb_data.get("strategy") != "basis_stat_arb")
     )
     if not is_funding_arb_bot:
         candidate_conf_dirs = [
@@ -1491,6 +1496,9 @@ def get_bot_funding_arbitrage_data(bot_name, performance):
                             pass
             if is_funding_arb_bot:
                 break
+
+    if not is_funding_arb_bot:
+        return False, None
 
     if is_funding_arb_bot and not arb_data:
         arb_data = {

@@ -270,12 +270,12 @@ def render_bot_card(bot_name):
                             if total_volume_traded < min_expected_vol:
                                 total_volume_traded = min_expected_vol
 
-                    # Calculate detailed breakdown for basis stat arb or funding arbitrage bots
-                    if is_basis_arb_bot and basis_data:
-                        render_basis_stat_arb_tables(basis_data, bot_name)
-                    elif is_funding_arb_bot and arb_data:
+                    # Calculate detailed breakdown for funding arbitrage or basis stat arb bots
+                    if is_funding_arb_bot and arb_data:
                         render_funding_arbitrage_kpi_cards(arb_data, total_volume_traded, total_global_pnl_quote)
                         render_funding_arbitrage_tables(arb_data, bot_name)
+                    elif is_basis_arb_bot and basis_data:
+                        render_basis_stat_arb_tables(basis_data, bot_name)
                     else:
                         total_global_pnl_pct = total_global_pnl_quote / total_volume_traded if total_volume_traded > 0 else 0
 
@@ -371,10 +371,10 @@ def render_bot_card(bot_name):
                     # For stopped bots, still show historical arbitrage data if present
                     is_funding_arb_bot, arb_data = get_bot_funding_arbitrage_data(bot_name, performance)
                     is_basis_arb_bot, basis_data = get_bot_basis_stat_arb_data(bot_name, performance)
-                    if is_basis_arb_bot and (basis_data.get("closed_trades") or basis_data.get("active_positions")):
-                        render_basis_stat_arb_tables(basis_data, bot_name)
-                    elif is_funding_arb_bot and (arb_data.get("closed_trades") or arb_data.get("active_positions")):
+                    if is_funding_arb_bot and (arb_data.get("closed_trades") or arb_data.get("active_positions")):
                         render_funding_arbitrage_tables(arb_data, bot_name)
+                    elif is_basis_arb_bot and (basis_data.get("closed_trades") or basis_data.get("active_positions")):
+                        render_basis_stat_arb_tables(basis_data, bot_name)
 
                 # Logs sections (available for both running and stopped bots)
                 with st.expander("📋 Error Logs"):

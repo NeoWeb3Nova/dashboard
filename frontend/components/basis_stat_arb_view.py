@@ -10,6 +10,10 @@ from frontend.components.timezone_utils import render_timezone_selector, format_
 
 def get_bot_basis_stat_arb_data(bot_name, performance):
     """Retrieve basis stat arb custom_info from MQTT performance or local disk."""
+    # Strict Isolation Guard: funding rate bots can NEVER be matched as basis bots
+    if "funding" in bot_name.lower() or "funding_rate_arb" in performance:
+        return False, None
+
     arb_data = None
     for ctrl_id, ctrl_dict in performance.items():
         if ctrl_id == "basis_stat_arb":
@@ -18,11 +22,10 @@ def get_bot_basis_stat_arb_data(bot_name, performance):
                 arb_data = c_info
                 break
 
+    # Strictly search only this instance's private directory
     candidate_json_paths = [
         os.path.abspath(os.path.join(os.path.dirname(__file__), f"../../../hummingbot-api/bots/instances/{bot_name}/data/basis_stat_arb_trades.json")),
         os.path.abspath(f"/home/neo/projects/hummingbot/hummingbot-api/bots/instances/{bot_name}/data/basis_stat_arb_trades.json"),
-        os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../hummingbot-api/bots/data/basis_stat_arb_trades.json")),
-        os.path.abspath(f"/home/neo/projects/hummingbot/hummingbot-api/bots/data/basis_stat_arb_trades.json"),
     ]
 
     if not arb_data:
@@ -54,13 +57,16 @@ def get_bot_basis_stat_arb_data(bot_name, performance):
                         try:
                             with open(os.path.join(conf_dir, fname), "r") as f:
                                 content = f.read()
-                                if "basis_stat_arb" in content or "v2_basis_stat_arb" in content:
+                                if ("basis_stat_arb" in content or "v2_basis_stat_arb" in content) and "v2_funding_rate_arb" not in content:
                                     is_basis_stat_arb_bot = True
                                     break
                         except Exception:
                             pass
             if is_basis_stat_arb_bot:
                 break
+
+    if not is_basis_stat_arb_bot:
+        return False, None
 
     if is_basis_stat_arb_bot and not arb_data:
         arb_data = {
