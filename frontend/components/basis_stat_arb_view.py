@@ -95,11 +95,12 @@ def render_basis_stat_arb_kpi_cards(arb_data, total_volume_traded=0.0):
     total_realized_pnl = sum(float(t.get("total_net_pnl", 0)) for t in closed_trades)
 
     unrealized_trading_pnl = sum(float(p.get("unrealized_trading_pnl", 0)) for p in active_pos)
-    unrealized_funding_pnl = sum(float(p.get("funding_income", 0)) for p in active_pos)
-    total_unrealized_pnl = unrealized_trading_pnl + unrealized_funding_pnl
+    unrealized_settled_funding = sum(float(p.get("settled_funding_pnl", p.get("funding_income", 0))) for p in active_pos)
+    unrealized_indicative_carry = sum(float(p.get("indicative_accrued_carry", 0)) for p in active_pos)
+    total_unrealized_pnl = unrealized_trading_pnl + unrealized_settled_funding
 
     net_combined_pnl = total_realized_pnl + total_unrealized_pnl
-    total_funding_harvested = realized_funding_pnl + unrealized_funding_pnl
+    total_funding_harvested = realized_funding_pnl + unrealized_settled_funding
 
     # Win rate & stats
     winning_trades = [t for t in closed_trades if float(t.get("total_net_pnl", 0)) > 0]
@@ -132,11 +133,11 @@ def render_basis_stat_arb_kpi_cards(arb_data, total_volume_traded=0.0):
         )
     with c4:
         st.metric(
-            "🎁 顺风收割利息 (Carry Bonus)",
+            "🎁 已结算资金费 (Settled Carry)",
             f"${total_funding_harvested:+,.2f}",
-            f"已入账 + 浮动利息",
+            f"已结 ${realized_funding_pnl:+,.2f} | 待结预估 ${unrealized_indicative_carry:+,.2f}",
             delta_color="normal",
-            help="在等待基差均值回归期间，持仓双边顺带收取的资金费现金流"
+            help="持仓实际跨越交易所结算时点（Binance 8h / Hyperliquid 1h）真实入账的资金费现金流（未结算资金费绝不提前虚增利润）"
         )
     with c5:
         st.metric(
@@ -212,7 +213,9 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
                 pos_size = float(p.get("position_size", 0.0))
                 unrealized = float(p.get("unrealized_trading_pnl", 0.0))
                 unrealized_pct = float(p.get("unrealized_pnl_pct", 0.0))
-                carry = float(p.get("funding_income", 0.0))
+                carry = float(p.get("settled_funding_pnl", p.get("funding_income", 0.0)))
+                indicative_carry = float(p.get("indicative_accrued_carry", 0.0))
+                settle_cnt = int(p.get("settlement_count", 0))
                 side1 = p.get("side_1", "")
                 side2 = p.get("side_2", "")
                 c1 = p.get("connector_1", "")
@@ -244,9 +247,10 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
                     <div style="display: flex; justify-content: space-between; margin-top: 10px; font-size: 0.82rem; color: #cbd5e1;">
                         <span>开仓基差: <b>{entry_basis:+.2%}</b></span>
                         <span>当前实时基差: <b>{curr_basis:+.2%}</b></span>
-                        <span>目标止盈收敛线: <b>≤ ±{target_comp:.2%}</b></span>
-                        <span>已收利息加成: <b style="color: #10b981;">+${carry:.2f}</b></span>
-                        <span>名义货值: <b>${pos_size:,.0f}</b></span>
+                        <span>目标止盈线: <b>≤ ±{target_comp:.2%}</b></span>
+                        <span>已结利息: <b style="color: #10b981;">+${carry:.2f}</b> <small style="color:#94a3b8;">({settle_cnt}次结算)</small></span>
+                        <span>待结预估: <small style="color:#94a3b8;">+${indicative_carry:.2f}</small></span>
+                        <span>单边货值: <b>${pos_size:,.0f}</b></span>
                     </div>
                     <div style="margin-top: 8px;">
                         <div style="display: flex; justify-content: space-between; font-size: 0.72rem; color: #94a3b8; margin-bottom: 2px;">
@@ -275,7 +279,8 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
                     "开仓基差": f"{float(t.get('entry_basis_pct', 0)):+.2%}",
                     "平仓基差": f"{float(t.get('close_basis_pct', 0)):+.2%}",
                     "价差净利润": f"${float(t.get('trading_pnl', 0)):+,.2f}",
-                    "资金费加成": f"${float(t.get('funding_pnl', 0)):+,.2f}",
+                    "已结资金费": f"${float(t.get('funding_pnl', 0)):+,.2f}",
+                    "结算次数": f"{t.get('settlement_count', 0)} 次",
                     "结清净收益": f"${float(t.get('total_net_pnl', 0)):+,.2f}",
                     "收益率 (ROE)": f"{float(t.get('net_pnl_pct', 0)):+.2%}",
                     "持仓时长": dur_str,
@@ -290,15 +295,19 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
         else:
             radar_rows = []
             for m in market_comp:
+                p1_val = float(m.get('price_1', 0))
+                p2_val = float(m.get('price_2', 0))
+                p1_str = f"${p1_val:,.4f}" if p1_val > 0 else "N/A"
+                p2_str = f"${p2_val:,.4f}" if p2_val > 0 else "N/A"
                 radar_rows.append({
                     "标的": m.get("token", ""),
-                    "Hyperliquid 价格": f"${float(m.get('price_1', 0)):,.4f}",
-                    "Binance 价格": f"${float(m.get('price_2', 0)):,.4f}",
-                    "实时基差偏离率": f"{float(m.get('basis_spread_pct', 0)):+.3%}",
+                    "Hyperliquid 价格": p1_str,
+                    "Binance 价格": p2_str,
+                    "可成交基差偏离率": f"{float(m.get('basis_spread_pct', 0)):+.3%}",
                     "HL 日资金费率": f"{float(m.get('c1_funding_daily', 0)):+.3%}/d",
                     "BN 日资金费率": f"{float(m.get('c2_funding_daily', 0)):+.3%}/d",
                     "顺风利差预计": f"{float(m.get('carry_if_short_c1', 0)):+.3%}/d",
-                    "脉冲捕获状态": m.get("dislocation_status", ""),
+                    "撮合撮合状态": m.get("dislocation_status", ""),
                 })
             df_radar = pd.DataFrame(radar_rows)
             st.dataframe(df_radar, use_container_width=True, hide_index=True)
