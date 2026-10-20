@@ -26,6 +26,7 @@ from frontend.components.timezone_utils import (
     render_timezone_selector,
 )
 from frontend.components.trade_attribution import analyze_trade_attribution, calculate_closed_summary
+from frontend.components.pnl_analytics import render_institutional_pnl_analytics
 
 
 
@@ -328,12 +329,13 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                     })
                 st.dataframe(pd.DataFrame(tp_rows), use_container_width=True, hide_index=True)
 
-    # --- Section B: 4 Multi-Dimensional Tabs ---
-    tab_pos, tab_closed, tab_rates, tab_charts = st.tabs([
+    # --- Section B: 5 Multi-Dimensional Tabs ---
+    tab_pos, tab_pnl, tab_closed, tab_rates, tab_charts = st.tabs([
         f"📈 活跃多空持仓 ({len(active_pos)})",
+        "📊 机构级盈亏全景分析",
         f"📜 历史平仓成交 ({len(closed_trades)})",
         f"🌐 实时费率与利差监控 ({len(market_comp)})",
-        f"📊 盘口深度透视与多维图表看板"
+        "🔬 盘口深度与流动性透视"
     ])
 
     with tab_pos:
@@ -757,6 +759,9 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                 f"- **🛡️ 为什么不立即开仓？** 跨所双边对冲开仓需扣除 Taker 手续费（双边合计约 0.08%~0.12%），若在微小利差下盲目进场会被手续费侵蚀，因此策略严格遵守安全门槛。\n"
                 f"- **💡 立即预演测试建议**：若希望在 Dry-Run 模式下立刻体验多空持仓与资金费定时结算，可将配置中的 `min_funding_rate_profitability` 调低至 `0.0001`（0.01%/天）或 `0`。"
             )
+
+    with tab_pnl:
+        render_institutional_pnl_analytics(arb_data, bot_name, active_tz=active_tz, tz_label=tz_label)
 
     with tab_closed:
         if closed_trades:
