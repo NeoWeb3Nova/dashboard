@@ -1,10 +1,13 @@
 import os
 import re
+import uuid
 import yaml
 import pandas as pd
 import streamlit as st
 
 from frontend.components.funding_scanner import scan_cross_exchange_opportunities
+from frontend.components.funding_config_ui import render_discovery_config
+from frontend.components.funding_contract import store_new_config
 from frontend.components.timezone_utils import DEFAULT_TIMEZONE, TIMEZONE_CHOICES
 from frontend.st_utils import get_backend_api_client, initialize_st_page
 
@@ -14,36 +17,8 @@ initialize_st_page(title="资金费率套利配置器 (Funding Rate Arb)", icon=
 # Get backend API client
 backend_api_client = get_backend_api_client()
 
-# ==================== 1. Educational Header & Banner ====================
-st.markdown("""
-### 💰 永续合约资金费率套利 (Funding Rate Arbitrage)
-> **无需拼毫秒延迟、完全免疫币价涨跌的 Delta-Neutral（绝对中性）纯吃利息策略**
-""")
-
-with st.expander("📘 点击展开：为什么这是普通个人交易者最理想的套利策略？", expanded=False):
-    c_info1, c_info2 = st.columns(2)
-    with c_info1:
-        st.markdown("""
-        **1. 零币价涨跌风险（Delta-Neutral）**
-        * 机器人在 **交易所 A 开多（Long）**，同时在 **交易所 B 开等额空单（Short）**。
-        * 无论代币暴涨 10 倍还是暴跌 90%，双边盈亏完全互相抵消，净持仓始终为 0。
-        
-        **2. 收益来源：每 8 小时稳拿利息**
-        * 加密货币永续合约每 1 小时或 8 小时由多头向空头（或反之）支付资金费。
-        * 机器人监测两所费率差，多空对冲后坐收利差，历史年化通常在 **15% ~ 50%**。
-        """)
-    with c_info2:
-        st.markdown("""
-        **3. 为什么家用普通网络也能跑？**
-        * 该策略不是高频争抢毫秒订单，持仓往往持续数天甚至数周。
-        * 即使家里网络有延迟，交易所里的多空单依然在按时替你收取利息。
-        
-        **4. 自动止盈与风控闭环**
-        * 内置收益达标自动平仓止盈（Take Profit）。
-        * 内置费率倒挂保护：一旦利差反转变为负数，自动平仓止损（Stop Loss）。
-        """)
-
-st.write("---")
+st.markdown("### 跨交易所永续资金费差：模拟配置")
+st.caption("匹配两腿数量可减少方向敞口，仍会承担基差变化、资金费反转、手续费、单腿保证金与数据中断风险。预测费差不是已实现收益。")
 
 # ==================== 2. Interactive Live APR Calculator ====================
 st.subheader("🧮 预期收益与年化利息计算器 (Live APR Calculator)")
@@ -66,15 +41,15 @@ with calc_col2:
         value=0.05,
         step=0.01,
         format="%.3f",
-        help="通常主流币费率为 0.01%~0.03%，热门山寨币（如 WIF/DOGE）在行情活跃时费率可达 0.05%~0.2%"
+        help="用于演算的周期化费差假设；不代表交易所当前费率或已确认收入。"
     )
 with calc_col3:
     calc_leverage = st.slider(
         "使用杠杆倍数 (Leverage)",
         min_value=1,
-        max_value=10,
-        value=3,
-        help="套利策略由于多空完全对冲，通常使用 2x~5x 杠杆以提高资金利用率。切勿使用极端高杠杆防插针！"
+        max_value=3,
+        value=1,
+        help="这里只计算保证金，不改变资金费率或固定名义头寸的毛收入；单腿仍有强平风险。"
     )
 
 # Math calculation
@@ -87,11 +62,12 @@ monthly_income = daily_income * 30.0
 margin_required = (calc_capital / calc_leverage) * 2  # 两边各开一份保证金
 
 m1, m2, m3, m4 = st.columns(4)
-m1.metric("预计单日纯利息", f"{daily_income:.2f} USDT", f"+{daily_rate*100:.2f}% / 天")
-m2.metric("预计月度纯利息", f"{monthly_income:.2f} USDT", f"约 {daily_income*30/margin_required*100:.1f}% 保证金收益")
-m3.metric("折算年化收益率 (APR)", f"{annual_apr:.2f} %", "纯吃息无币价风险")
+m1.metric("假设日毛资金费", f"{daily_income:.2f} USDT", f"+{daily_rate*100:.2f}% / 天")
+m2.metric("假设30天毛资金费", f"{monthly_income:.2f} USDT", f"约 {daily_income*30/margin_required*100:.1f}% 保证金收益")
+m3.metric("折算年化收益率 (APR)", f"{annual_apr:.2f} %", "按当前假设费差简单年化，未扣成本")
 m4.metric("所需实际占用保证金", f"{margin_required:.2f} USDT", f"双边合计 ({calc_leverage}x 杠杆)")
 
+st.caption("此计算器假设双方费差均已折算至同一 8 小时周期，且费差保持不变。实际按各合约周期、持仓方向和历史费率结算；不是净收益预测。")
 st.write("---")
 
 # ==================== 3. Core Strategy Configuration Form ====================
@@ -153,7 +129,7 @@ if connector_1 == connector_2:
 
 # Step 2: Live Market Opportunities Scanner & Tokens Selection
 st.markdown("#### 2. 全市场实时利差雷达与监控标的 (Market Radar & Tokens Selection)")
-st.caption("🚀 **主动雷达巡检**：系统自动并发比对 Binance 与 Hyperliquid 全市场 200+ 个共有合约的最新资金费率，智能找出当前暴利机会，告别盲目死守死等！")
+st.caption("此处为独立公开费率初筛，仅辅助选择启动币；其过滤条件和刷新时刻与运行引擎不同，不代表已通过盘口、完整成本与预算验证。")
 
 # Scanner cache and fetch
 @st.cache_data(ttl=30, show_spinner=False)
@@ -170,7 +146,7 @@ with st.expander(f"📡 点击展开：全市场实时利差机会排行榜 (已
     col_filter1, col_filter2, col_filter3 = st.columns([2, 1, 1])
     with col_filter1:
         if live_opps:
-            st.markdown(f"🔥 当前全市场最高套利机会：**{live_opps[0]['coin']}** (年化 APR **{live_opps[0]['apr']:.2f}%**, 日化 **{live_opps[0]['daily_diff_pct']:+.4f}%/天**)")
+            st.markdown(f"当前公开初筛的最高预测毛费差：**{live_opps[0]['coin']}** (年化 APR **{live_opps[0]['apr']:.2f}%**, 日化 **{live_opps[0]['daily_diff_pct']:+.4f}%/天**)")
         else:
             st.markdown("ℹ️ 暂未获取到全市场费率，请点击刷新。")
     with col_filter2:
@@ -190,7 +166,7 @@ with st.expander(f"📡 点击展开：全市场实时利差机会排行榜 (已
             "折算年化 (APR)": f"{o['apr']:+.2f}%",
             "折算日化利差": f"{o['daily_diff_pct']:+.4f}% / 天",
             "流动性评级": o.get("liquidity_badge", "🟡 适中"),
-            "建议单笔上限": o.get("safe_cap", "$2,000 ~ $5,000"),
+            "盘口容量结论": o.get("safe_cap", "未测算"),
             "HL 24h成交量": f"${o.get('hl_vol_24h', 0):,.0f}",
             "BN 24h成交量": f"${o.get('bn_vol_24h', 0):,.0f}",
             "推荐套利组合方向": o["best_path"],
@@ -198,11 +174,8 @@ with st.expander(f"📡 点击展开：全市场实时利差机会排行榜 (已
         } for i, o in enumerate(live_opps[:15], 1)])
         st.dataframe(radar_df, use_container_width=True, hide_index=True)
 
-        st.caption(
-            "💡 **标准化资产对齐与避坑法则**：已通过量化引擎自动对齐跨交易所不同命名与乘数代币（如 PEPE/BONK/SHIB/FLOKI/LUNC，Hyperliquid 为 k 乘数，Binance 为 1000 乘数），"
-            "并已通过 3% 价格偏差熔断拦截了可能重名或迁移折价的分叉代币。"
-            "超高利差但成交量较小（流动性较薄）的标的，建议将单笔金额控制在推荐上限内！"
-        )
+        st.caption("雷达做了名称/乘数和价格偏差初筛，不能证明资产身份或安全交易容量。运行引擎还会执行更严格的成交量、基差、真实盘口与完整费用约束。")
+
 
 # Selection controls
 if "selected_arb_tokens" not in st.session_state:
@@ -269,9 +242,9 @@ with c_p1:
     )
     position_size_quote = st.number_input(
         "单仓名义价值 (USDT/USD)",
-        min_value=10.0,
+        min_value=100.0,
         max_value=100000.0,
-        value=100.0,
+        value=500.0,
         step=50.0,
         help="每个币种套利时建立的单边头寸价值"
     )
@@ -282,25 +255,25 @@ with c_p2:
         "入场最小日化费率差 (%)",
         min_value=0.01,
         max_value=5.0,
-        value=0.10,
+        value=0.12,
         step=0.02,
         format="%.2f",
         help="24小时内两所费率差达到该百分比才开仓。例如 0.10% 对应年化约 36.5%"
     ) / 100.0
 
     profitability_to_take_profit = st.number_input(
-        "达标自动止盈收益率 (%)",
+        "净损益止盈门槛（占单边参考名义，%）",
         min_value=0.1,
         max_value=20.0,
-        value=1.0,
+        value=2.0,
         step=0.5,
         format="%.1f",
-        help="当持仓总收益（已收资金费利息 + 盘口盈亏）达到本仓位的该比例时，自动双边平仓获利落袋"
+        help="按后台净损益/单边参考名义金额判断；含两腿入场与预计退出费用。这不是双腿保证金 ROE。"
     ) / 100.0
 
 with c_p3:
     funding_rate_diff_stop_loss = st.number_input(
-        "费率倒挂止损阈值 (%)",
+        "费率倒挂止损阈值（日比例，%）",
         min_value=-5.0,
         max_value=-0.10,
         value=-0.10,
@@ -310,9 +283,9 @@ with c_p3:
     ) / 100.0
 
     trade_profitability_condition = st.checkbox(
-        "开仓时检查盘口滑点与买卖价差",
+        "额外要求即刻往返净损益非负",
         value=False,
-        help="开启后，只有当开仓时两边的现价没有产生严重负滑点时才开仓，进一步保护利润"
+        help="无论此开关状态，盘口、完整费用、基差、回本与容量检查始终执行。开启后还要求立即往返净损益非负，可能导致长期无交易。"
     )
 
     dynamic_position_sizing = st.checkbox(
@@ -322,12 +295,14 @@ with c_p3:
     )
 
     selected_timezone = st.selectbox(
-        "🌐 策略参考基准时区 (Timezone)",
+        "🌐 页面显示时区（不写入策略 YAML）",
         options=list(TIMEZONE_CHOICES.keys()),
         index=0,  # "Asia/Shanghai" by default!
         format_func=lambda k: TIMEZONE_CHOICES.get(k, k),
-        help="设置该套利机器人的参考基准时区（默认北京时间 / 上海时间 UTC+8）。持仓看板、成交记录与结算通知均以此基准显示。"
+        help="只影响前端时间展示。交易所结算周期和引擎时间戳不因此改变。"
     )
+
+st.session_state["selected_timezone"] = selected_timezone
 
 with st.expander("🛡️ 高级风控与防抖防护盾 (Institutional Risk Shields)", expanded=False):
     c_r1, c_r2, c_r3 = st.columns(3)
@@ -338,16 +313,16 @@ with st.expander("🛡️ 高级风控与防抖防护盾 (Institutional Risk Shi
             max_value=12.0,
             value=12.0,
             step=1.0,
-            help="开仓摩擦成本（双边买卖点差+手续费）按当前费率计算的回本小时数，超过该阈值坚决不开仓（默认 ≤ 12h）。"
+            help="两腿完整往返手续费、盘口与不利基差压力成本按当前预测资金费计算的回本小时数，超过该阈值坚决不开仓（默认 ≤ 12h）。"
         )
         max_entry_spread_friction_pct = st.number_input(
-            "开仓摩擦成本硬天花板 (%)",
+            "完整开平仓摩擦比例上限（%）",
             min_value=0.05,
             max_value=3.0,
             value=0.50,
             step=0.05,
             format="%.2f",
-            help="无论资金费率多诱人，开仓瞬间盘口摩擦（点差+手续费）超过此百分比坚决不开仓，防止踩入流动性陷阱（默认 ≤ 0.5%）。"
+            help="无论资金费率多诱人，完整往返盘口、费用与基差压力成本超过此百分比坚决不开仓，防止踩入流动性陷阱（默认 ≤ 0.5%）。"
         ) / 100.0
     with c_r2:
         single_loss_quarantine_threshold = st.number_input(
@@ -387,14 +362,13 @@ with st.expander("🛡️ 高级风控与防抖防护盾 (Institutional Risk Shi
 st.write("---")
 
 # ==================== 4. Live YAML Config Generation & Preview ====================
-st.subheader("📋 策略配置预览 (Live Configuration Preview)")
+st.subheader("📋 新实例配置预览（不会改动运行中实例）")
 
 config_dict = {
     "script_file_name": "v2_funding_rate_arb.py",
     "dry_run": True,
     "paper_account_balance_quote": float(paper_account_balance_quote),
     "paper_margin_reserve_pct": float(paper_margin_reserve_pct),
-    "timezone": selected_timezone,
     "connectors": [connector_1, connector_2],
     "tokens": final_tokens,
     "leverage": int(leverage),
@@ -414,6 +388,9 @@ config_dict = {
     "reentry_cooldown_seconds": int(reentry_cooldown_seconds),
 }
 
+config_dict, validation_errors = render_discovery_config(config_dict)
+for validation_error in validation_errors:
+    st.error(validation_error)
 yaml_preview = yaml.dump(config_dict, default_flow_style=False, sort_keys=False)
 
 c_cfg1, c_cfg2 = st.columns([0.6, 0.4])
@@ -423,7 +400,9 @@ with c_cfg1:
 with c_cfg2:
     st.markdown("#### ⚙️ 配置文件命名与保存")
     mode_suffix = "_dry_run" if is_dry_run else ""
-    default_cfg_name = f"funding_arb_{connector_1.split('_')[0]}_{connector_2.split('_')[0]}{mode_suffix}"
+    if 'funding_config_suffix' not in st.session_state:
+        st.session_state['funding_config_suffix'] = uuid.uuid4().hex[:8]
+    default_cfg_name = f"funding_arb_{connector_1.split('_')[0]}_{connector_2.split('_')[0]}{mode_suffix}_{st.session_state['funding_config_suffix']}"
     user_config_name = st.text_input(
         "配置文件名 (Config Name)",
         value=default_cfg_name,
@@ -438,27 +417,17 @@ with c_cfg2:
     save_btn = st.button("💾 保存策略配置到系统", use_container_width=True, type="primary")
 
     if save_btn:
-        if connector_1 == connector_2:
+        if validation_errors or not clean_config_name:
+            st.error('配置无效，请先修正上面的参数及文件名。')
+        elif connector_1 == connector_2:
             st.error("无法保存：两所不能相同！")
         elif not final_tokens:
             st.error("无法保存：未选择监控代币！")
         else:
             try:
                 # 1. Save via Backend API (Backend API manages conf/scripts inside Docker)
-                backend_api_client.scripts.create_or_update_script_config(
-                    config_name=clean_config_name,
-                    config=config_dict
-                )
+                store_new_config(backend_api_client.scripts, clean_config_name, config_dict)
                 
-                # 2. Best-effort local file sync if directory is writable
-                local_scripts_conf = os.path.join(os.path.dirname(__file__), "../../../../../hummingbot-api/bots/conf/scripts")
-                if os.path.exists(local_scripts_conf):
-                    try:
-                        with open(os.path.join(local_scripts_conf, f"{clean_config_name}.yml"), "w") as f:
-                            yaml.dump(config_dict, f, default_flow_style=False)
-                    except Exception:
-                        pass  # Backend API already successfully persisted the file
-
                 st.success(f"🎉 成功保存配置文件: `{clean_config_name}.yml`！")
                 st.session_state["saved_funding_cfg"] = clean_config_name
             except Exception as e:
@@ -475,7 +444,7 @@ try:
 except Exception:
     available_credentials = ["master_account"]
 
-active_saved_cfg = st.session_state.get("saved_funding_cfg", clean_config_name)
+active_saved_cfg = clean_config_name  # Deploy current preview under its current name, not a stale saved name.
 
 if is_dry_run:
     st.info("💡 **纸面预演（Dry Run）部署提示**：启动机器人无需在凭证中配置 API Key，系统将自动连接交易所公开接口进行实时监控与沙盒模拟，无任何资金损失风险。")
@@ -491,8 +460,8 @@ with dep_col1:
 with dep_col2:
     selected_cred = st.selectbox(
         "选择交易凭证配置 (Credentials Profile)",
-        options=available_credentials if available_credentials else ["master_account"],
-        help="包含交易所 API Key 的凭证环境"
+        options=sorted(available_credentials, key=lambda name: name != "funding-paper-public") if available_credentials else ["master_account"],
+        help="优先使用 funding-paper-public；策略使用公开行情，不需要交易所密钥。"
     )
 with dep_col3:
     image_name = st.text_input(
@@ -505,16 +474,15 @@ deploy_btn = st.button("🚀 立即部署资金费率套利机器人", use_conta
 
 if deploy_btn:
     clean_bot_name = re.sub(r'[^A-Za-z0-9_-]', '_', bot_name)
-    if not clean_bot_name:
+    if validation_errors or not active_saved_cfg:
+        st.error('配置无效，未保存或部署。请修正参数及文件名。')
+    elif not clean_bot_name:
         st.error("请输入有效的机器人实例名称！")
     else:
         with st.spinner(f"正在部署机器人 {clean_bot_name} 并注入配置 {active_saved_cfg}..."):
             try:
                 # 确保配置已保存
-                backend_api_client.scripts.create_or_update_script_config(
-                    config_name=active_saved_cfg,
-                    config=config_dict
-                )
+                store_new_config(backend_api_client.scripts, active_saved_cfg, config_dict)
                 
                 # 调用 deploy_v2_script，确保 script_config 带有 .yml 后缀
                 cfg_with_ext = active_saved_cfg if active_saved_cfg.endswith((".yml", ".yaml")) else f"{active_saved_cfg}.yml"
