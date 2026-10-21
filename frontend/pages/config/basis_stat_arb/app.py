@@ -95,7 +95,14 @@ st.write("---")
 st.subheader("📡 实时跨所基差脉冲雷达 (Live Basis Dislocation Radar)")
 st.caption("从 Binance 与 Hyperliquid 深度实时拉取主流高流动性标的盘口，监测偏离脉冲机会。")
 
-top_tokens_default = ["BTC", "ETH", "SOL", "AVAX", "SUI", "DOGE", "NEAR", "APT", "ARB", "OP", "LINK"]
+top_tokens_default = [
+    "BTC", "ETH", "SOL", "BNB", "AVAX", "SUI", "NEAR", "APT", "ADA", "ARB",
+    "OP", "TIA", "SEI", "INJ", "STRK", "SAGA", "DYM", "ZK", "MANTA", "AAVE",
+    "CRV", "UNI", "ENA", "PENDLE", "LDO", "ONDO", "DYDX", "JTO", "PYTH", "SNX",
+    "FET", "RENDER", "IO", "WLD", "KAS", "TAO", "FIL", "EIGEN", "DOGE", "WIF",
+    "BOME", "ORDI", "POPCAT", "MEME", "XRP", "LINK", "LTC", "BCH"
+]
+core_tokens_11 = ["BTC", "ETH", "SOL", "AVAX", "SUI", "DOGE", "NEAR", "APT", "ARB", "OP", "LINK"]
 
 col_radar_btn1, col_radar_btn2, _ = st.columns([1.5, 1.5, 3])
 with col_radar_btn1:
@@ -144,10 +151,21 @@ with form_col1:
         help="用逗号分隔，首选 Hyperliquid 与 Binance 永续合约"
     )
 
-    default_tokens_str = ", ".join(top_tokens_default)
+    col_tok_btn1, col_tok_btn2 = st.columns(2)
+    if "selected_basis_tokens" not in st.session_state:
+        st.session_state["selected_basis_tokens"] = ", ".join(top_tokens_default)
+    with col_tok_btn1:
+        if st.button("⚡ 载入 48 精选高弹性标的", use_container_width=True):
+            st.session_state["selected_basis_tokens"] = ", ".join(top_tokens_default)
+            st.rerun()
+    with col_tok_btn2:
+        if st.button("🎯 仅载入 11 大核心主流币", use_container_width=True):
+            st.session_state["selected_basis_tokens"] = ", ".join(core_tokens_11)
+            st.rerun()
+
     tokens_input = st.text_area(
         "监控高流动性标的池 (Tokens)",
-        value=default_tokens_str,
+        value=st.session_state["selected_basis_tokens"],
         help="用逗号分隔。强烈建议仅配置主流做市币（严禁配置无做市商的劣质山寨币）"
     )
 
@@ -174,52 +192,117 @@ with form_col2:
 
     min_entry_basis_pct = st.number_input(
         "基差偏离入场门槛 (%)",
-        min_value=0.30,
+        min_value=0.15,
         max_value=3.00,
-        value=0.70,
-        step=0.05,
+        value=0.32,
+        step=0.01,
         format="%.2f",
-        help="当两所归一化价差偏离达到此数值时（如 0.70%），触发展开入场"
+        help="当两所归一化可成交价差偏离达到此数值时触发展开入场。实测双边往返硬摩擦约 0.22%，推荐 0.32% (32 bps) 既能覆盖摩擦又兼顾活跃度。"
     ) / 100.0
 
     tp_compression_pct = st.number_input(
         "均值回归止盈压缩阈值 (%)",
-        min_value=0.05,
+        min_value=0.01,
         max_value=0.50,
-        value=0.15,
+        value=0.05,
         step=0.01,
         format="%.2f",
-        help="当基差重新压缩至此数值以内时（如 0.15%），判定均值回归完成，立即平仓止盈"
+        help="当基差重新压缩至此数值以内时（如 0.05% 即 5 bps），判定均值回归完成，立即平仓止盈"
     ) / 100.0
 
     min_tp_net_pct = st.number_input(
         "综合净收益达标止盈线 (%)",
-        min_value=0.20,
+        min_value=0.10,
         max_value=2.00,
-        value=0.50,
-        step=0.05,
+        value=0.20,
+        step=0.02,
         format="%.2f",
-        help="若持仓综合净收益率（含利息并扣减手续费）达到此数值，直接触发止盈"
+        help="持仓综合真实净利润率（已扣除 4 腿真实 Taker 手续费并加上已结算资金费）达到此数值直接止盈"
     ) / 100.0
 
     max_hold_hours = st.number_input(
         "最大持仓时间上限 (小时)",
-        min_value=1.0,
+        min_value=0.5,
         max_value=24.0,
         value=6.0,
         step=0.5,
-        help="超过此时限若基差仍未收敛，只要小盈或保本即主动离场释放资金"
+        help="超过此时限若基差仍未收敛，只要小盈或微亏即主动离场释放资金"
     )
 
     max_basis_loss_pct = st.number_input(
         "基差恶性走阔硬止损线 (%)",
-        min_value=0.80,
-        max_value=3.00,
+        min_value=0.50,
+        max_value=5.00,
         value=1.50,
         step=0.10,
         format="%.2f",
-        help="若两所基差反向撕裂达到此比例且持续确认，双边强制平仓止损防御"
+        help="若两所基差反向撕裂达到此比例且持续确认，双边强制平仓止损防御（不受最低持仓冷静期限制）"
     ) / 100.0
+
+st.write("")
+st.markdown("##### 3. 🛡️ 防高频磨损与微观执行风控 (Case 32 机构级防线)")
+col_guard1, col_guard2, col_guard3 = st.columns(3)
+with col_guard1:
+    min_holding_seconds = st.number_input(
+        "最低持仓冷静期 (秒)",
+        min_value=0,
+        max_value=3600,
+        value=60,
+        step=10,
+        help="止盈出场前强制维持的最短持仓时间（秒），杜绝 1~2 秒盘口微波噪音虚假刷单换手。注意：硬止损防爆不受限制！"
+    )
+    exit_persistence_ticks = st.number_input(
+        "止盈信号维持确认 Tick 数",
+        min_value=1,
+        max_value=10,
+        value=2,
+        step=1,
+        help="止盈条件必须连续满足的 Tick 计数，过滤瞬时盘口毛刺脉冲"
+    )
+
+with col_guard2:
+    taker_fee_rate_input = st.number_input(
+        "预估单腿 Taker 手续费率 (%)",
+        min_value=0.01,
+        max_value=0.20,
+        value=0.05,
+        step=0.01,
+        format="%.3f",
+        help="两所单腿 Taker 手续费估算值（如 0.05% 即 0.0005，双边开平共 4 腿合计约 0.20%）"
+    )
+    taker_fee_rate = taker_fee_rate_input / 100.0
+
+    settlement_blackout_seconds = st.number_input(
+        "资金费结算避让保护窗 (秒)",
+        min_value=0,
+        max_value=600,
+        value=60,
+        step=10,
+        help="距离交易所离散资金费结算窗口前后的保护秒数，若预期息差倒挂则跳过开仓"
+    )
+
+with col_guard3:
+    trailing_activation_input = st.number_input(
+        "移动止盈激活阈值 (%)",
+        min_value=0.10,
+        max_value=2.00,
+        value=0.30,
+        step=0.05,
+        format="%.2f",
+        help="当持仓综合净利润率达到此比例时激活移动止盈追踪锁"
+    )
+    trailing_stop_activation_pct = trailing_activation_input / 100.0
+
+    trailing_distance_input = st.number_input(
+        "移动止盈回撤回吐线 (%)",
+        min_value=0.05,
+        max_value=1.00,
+        value=0.10,
+        step=0.01,
+        format="%.2f",
+        help="自最高峰值利润回撤达到此比例时，触发移动止盈双边平仓"
+    )
+    trailing_stop_distance_pct = trailing_distance_input / 100.0
 
 # Build final config dictionary
 tokens_list = [t.strip().upper() for t in tokens_input.split(",") if t.strip()]
@@ -240,11 +323,15 @@ config_dict = {
     "entry_persistence_ticks": 2,
     "stop_loss_confirmation_ticks": 5,
     "reentry_cooldown_seconds": 600,
-    "trailing_stop_activation_pct": 0.0060,
-    "trailing_stop_distance_pct": 0.0020,
+    "trailing_stop_activation_pct": float(trailing_stop_activation_pct),
+    "trailing_stop_distance_pct": float(trailing_stop_distance_pct),
     "require_favorable_funding": False,
     "max_adverse_daily_funding_pct": 0.0010,
     "max_orderbook_depth_ratio": 0.20,
+    "min_holding_seconds": int(min_holding_seconds),
+    "exit_persistence_ticks": int(exit_persistence_ticks),
+    "taker_fee_rate": float(taker_fee_rate),
+    "settlement_blackout_seconds": int(settlement_blackout_seconds),
 }
 
 st.write("---")
@@ -260,7 +347,7 @@ with col_save1:
     config_file_name = st.text_input(
         "配置文件名",
         value="basis_stat_arb_hyperliquid_binance_dry_run.yml",
-        help="将保存至 bots/conf/scripts/ 目录下"
+        help="将保存至 bots/conf/scripts/ 目录下，并自动按需同步至匹配实例目录"
     )
 with col_save2:
     st.write("")
@@ -276,17 +363,27 @@ if save_btn:
         os.path.abspath(os.path.join(os.path.dirname(__file__), f"../../../../hummingbot-api/bots/conf/scripts/{config_file_name}")),
     ]
 
-    saved = False
+    # Rule 3: Check and sync to matching active instance directories
+    import glob
+    instance_pattern = os.path.abspath(f"/home/neo/projects/hummingbot/hummingbot-api/bots/instances/*/conf/scripts/{config_file_name}")
+    matched_instances = glob.glob(instance_pattern)
+    for inst_conf in matched_instances:
+        if inst_conf not in save_paths:
+            save_paths.append(inst_conf)
+
+    saved_count = 0
+    saved_locations = []
     for p in save_paths:
         try:
             os.makedirs(os.path.dirname(p), exist_ok=True)
             with open(p, "w") as f:
                 yaml.dump(config_dict, f, default_flow_style=False, sort_keys=False)
-            saved = True
-            st.success(f"✅ 配置已成功保存至 `{p}`！")
-            break
+            saved_count += 1
+            saved_locations.append(p)
         except Exception as e:
             pass
 
-    if not saved:
+    if saved_count > 0:
+        st.success(f"✅ 配置已成功保存并同步至 {saved_count} 处路径：\n" + "\n".join([f"- `{loc}`" for loc in saved_locations]))
+    else:
         st.error(f"❌ 无法保存配置文件，请检查目录权限。")

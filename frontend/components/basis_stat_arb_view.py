@@ -8,6 +8,22 @@ from frontend.components.clock_monitor import get_exchange_clock_health
 from frontend.components.timezone_utils import render_timezone_selector, format_timestamp
 
 
+def format_precise_duration(seconds) -> str:
+    """Format duration with seconds precision so short trades never show as 0h 0m."""
+    if seconds is None or seconds < 0:
+        return "0秒"
+    seconds = int(seconds)
+    if seconds < 60:
+        return f"{seconds}秒"
+    m = seconds // 60
+    s = seconds % 60
+    if m < 60:
+        return f"{m}分 {s}秒"
+    h = m // 60
+    m = m % 60
+    return f"{h}小时 {m}分 {s}秒"
+
+
 def get_bot_basis_stat_arb_data(bot_name, performance):
     """Retrieve basis stat arb custom_info from MQTT performance or local disk."""
     # Strict Isolation Guard: funding rate bots can NEVER be matched as basis bots
@@ -93,6 +109,8 @@ def render_basis_stat_arb_kpi_cards(arb_data, total_volume_traded=0.0):
     realized_trading_pnl = sum(float(t.get("trading_pnl", 0)) for t in closed_trades)
     realized_funding_pnl = sum(float(t.get("funding_pnl", 0)) for t in closed_trades)
     total_realized_pnl = sum(float(t.get("total_net_pnl", 0)) for t in closed_trades)
+    total_trading_fees = sum(float(t.get("trading_fee", 3.0)) for t in closed_trades)
+    total_gross_trading = sum(float(t.get("gross_trading_pnl", float(t.get("trading_pnl", 0)) + float(t.get("trading_fee", 3.0)))) for t in closed_trades)
 
     unrealized_trading_pnl = sum(float(p.get("unrealized_trading_pnl", 0)) for p in active_pos)
     unrealized_settled_funding = sum(float(p.get("settled_funding_pnl", p.get("funding_income", 0))) for p in active_pos)
@@ -105,7 +123,8 @@ def render_basis_stat_arb_kpi_cards(arb_data, total_volume_traded=0.0):
     # Win rate & stats
     winning_trades = [t for t in closed_trades if float(t.get("total_net_pnl", 0)) > 0]
     win_rate = (len(winning_trades) / len(closed_trades) * 100.0) if closed_trades else 0.0
-    avg_hold_minutes = (sum(int(t.get("duration_seconds", 0)) for t in closed_trades) / len(closed_trades) / 60.0) if closed_trades else 0.0
+    avg_hold_seconds = (sum(int(t.get("duration_seconds", 0)) for t in closed_trades) / len(closed_trades)) if closed_trades else 0.0
+    avg_hold_str = format_precise_duration(avg_hold_seconds)
 
     c1, c2, c3, c4, c5 = st.columns(5)
     with c1:
@@ -117,19 +136,19 @@ def render_basis_stat_arb_kpi_cards(arb_data, total_volume_traded=0.0):
         )
     with c2:
         st.metric(
-            "🏦 已平仓战报结清利润",
+            "🏦 已平仓战报结清净利",
             f"${total_realized_pnl:+,.2f}",
-            f"胜率 {win_rate:.1f}% ({len(winning_trades)}/{len(closed_trades)} 胜)",
+            f"毛利 ${total_gross_trading:+,.1f} | 扣费 -${total_trading_fees:,.1f}",
             delta_color="normal",
-            help="所有已均值回归平仓的结清真金白银净收益（扣除双边手续费）"
+            help=f"所有已均值回归平仓的结清真金白银净收益。已扣除全部4腿真实Taker手续费（${total_trading_fees:,.2f}）。胜率 {win_rate:.1f}% ({len(winning_trades)}/{len(closed_trades)} 胜)"
         )
     with c3:
         st.metric(
-            "📈 活跃持仓浮动盈亏",
+            "📈 活跃持仓浮动净盈亏",
             f"${total_unrealized_pnl:+,.2f}",
             f"正在收敛 {len(active_pos)} 仓位",
             delta_color="normal",
-            help="当前活跃基差仓位的瞬时浮动盈亏（随盘口基差压缩每秒动态更新）"
+            help="当前活跃基差仓位的净浮动盈亏（已计入开平仓摩擦与动态价差，随盘口基差压缩动态更新）"
         )
     with c4:
         st.metric(
@@ -142,8 +161,8 @@ def render_basis_stat_arb_kpi_cards(arb_data, total_volume_traded=0.0):
     with c5:
         st.metric(
             "⏱️ 平均持仓平仓周期",
-            f"{avg_hold_minutes:.1f} 分钟" if avg_hold_minutes < 120 else f"{avg_hold_minutes/60:.1f} 小时",
-            f"共已结算 {len(closed_trades)} 笔",
+            avg_hold_str,
+            f"胜率 {win_rate:.1f}% ({len(closed_trades)}笔)",
             help="均值回归快速了结，绝不死扛，资金极速释放"
         )
 
@@ -201,54 +220,69 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
 
     with tab_active:
         if not active_pos:
-            st.info("ℹ️ 当前暂无活跃的基差偏离套利持仓。策略正以 1 秒高频持续巡检主流币跨所价差，一旦盘口基差偏离 ≥ 0.70%，将自动以两所等额多空对冲介入！")
+            st.info("ℹ️ 当前暂无活跃的基差偏离套利持仓。策略正以 1 秒高频持续巡检主流币跨所价差，一旦盘口基差偏离 ≥ 0.32%，将自动以两所等额多空对冲介入！")
         else:
             for p in active_pos:
+                min_hold = int(p.get("min_holding_seconds", arb_data.get("min_holding_seconds", 60)))
                 tok = p.get("token", "")
-                dur_m = p.get("duration_seconds", 0) // 60
-                dur_str = f"{dur_m // 60}h {dur_m % 60}m"
+                dur_sec = int(p.get("duration_seconds", 0))
+                dur_str = format_precise_duration(dur_sec)
                 entry_basis = float(p.get("entry_basis_pct", 0.0))
                 curr_basis = float(p.get("current_basis_pct", 0.0))
                 target_comp = float(p.get("target_compression_pct", 0.0015))
                 pos_size = float(p.get("position_size", 0.0))
+                
+                # Full fee and PnL breakdown
                 unrealized = float(p.get("unrealized_trading_pnl", 0.0))
-                unrealized_pct = float(p.get("unrealized_pnl_pct", 0.0))
+                fee_est = float(p.get("trading_fee", 3.0))
+                gross_unrealized = float(p.get("gross_unrealized_trading_pnl", unrealized + fee_est))
+                net_unrealized = float(p.get("net_unrealized_trading_pnl", unrealized))
                 carry = float(p.get("settled_funding_pnl", p.get("funding_income", 0.0)))
                 indicative_carry = float(p.get("indicative_accrued_carry", 0.0))
+                total_pos_net = net_unrealized + carry
+                
                 settle_cnt = int(p.get("settlement_count", 0))
                 side1 = p.get("side_1", "")
                 side2 = p.get("side_2", "")
                 c1 = p.get("connector_1", "")
                 c2 = p.get("connector_2", "")
 
+                # Anti-churn lock badge
+                if dur_sec < min_hold:
+                    lock_badge = f'<span style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); padding: 2px 7px; border-radius: 4px; font-size: 0.72rem; margin-left: 8px;">🛡️ 冷却锁定中 ({dur_sec}s / 门槛 {min_hold}s)</span>'
+                else:
+                    lock_badge = '<span style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); padding: 2px 7px; border-radius: 4px; font-size: 0.72rem; margin-left: 8px;">🟢 止盈就绪</span>'
+
                 # Compression progress calculation
                 initial_abs_gap = abs(entry_basis)
                 current_abs_gap = abs(curr_basis)
                 progress_pct = max(0.0, min(100.0, (1.0 - (current_abs_gap / initial_abs_gap)) * 100.0)) if initial_abs_gap > 0 else 100.0
 
-                pnl_color = "#10b981" if unrealized >= 0 else "#ef4444"
+                pnl_color = "#10b981" if total_pos_net >= 0 else "#ef4444"
 
                 st.markdown(f"""
                 <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(59, 130, 246, 0.25);
                             border-radius: 10px; padding: 14px; margin-bottom: 12px;">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <div>
+                        <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
                             <span style="font-size: 1.15rem; font-weight: 700; color: #f8fafc;">🪙 {tok}</span>
-                            <span style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; margin-left: 8px;">
+                            <span style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; margin-left: 4px;">
                                 {side1} {c1} + {side2} {c2}
                             </span>
-                            <span style="color: #94a3b8; font-size: 0.8rem; margin-left: 10px;">持仓耗时: {dur_str}</span>
+                            {lock_badge}
+                            <span style="color: #94a3b8; font-size: 0.8rem; margin-left: 6px;">持仓: {dur_str}</span>
                         </div>
                         <div style="text-align: right;">
-                            <span style="font-size: 1.15rem; font-weight: 700; color: {pnl_color};">${unrealized:+,.2f}</span>
-                            <span style="font-size: 0.85rem; color: {pnl_color}; margin-left: 6px;">({unrealized_pct:+.2%})</span>
+                            <span style="font-size: 1.15rem; font-weight: 700; color: {pnl_color};">${total_pos_net:+,.2f}</span>
+                            <span style="font-size: 0.78rem; color: #94a3b8; margin-left: 6px;">(毛价差 ${gross_unrealized:+,.2f} | 扣手续费 -${fee_est:,.2f})</span>
                         </div>
                     </div>
-                    <div style="display: flex; justify-content: space-between; margin-top: 10px; font-size: 0.82rem; color: #cbd5e1;">
+                    <div style="display: flex; justify-content: space-between; margin-top: 10px; font-size: 0.82rem; color: #cbd5e1; flex-wrap: wrap; gap: 6px;">
                         <span>开仓基差: <b>{entry_basis:+.2%}</b></span>
                         <span>当前实时基差: <b>{curr_basis:+.2%}</b></span>
                         <span>目标止盈线: <b>≤ ±{target_comp:.2%}</b></span>
-                        <span>已结利息: <b style="color: #10b981;">+${carry:.2f}</b> <small style="color:#94a3b8;">({settle_cnt}次结算)</small></span>
+                        <span>预估4腿手续费: <b style="color: #f87171;">-${fee_est:,.2f}</b></span>
+                        <span>已结资金费: <b style="color: #10b981;">+${carry:.2f}</b> <small style="color:#94a3b8;">({settle_cnt}周期)</small></span>
                         <span>待结预估: <small style="color:#94a3b8;">+${indicative_carry:.2f}</small></span>
                         <span>单边货值: <b>${pos_size:,.0f}</b></span>
                     </div>
@@ -270,20 +304,29 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
         else:
             closed_rows = []
             for t in reversed(closed_trades):
-                dur_m = t.get("duration_seconds", 0) // 60
-                dur_str = f"{dur_m // 60}h {dur_m % 60}m"
+                dur_sec = int(t.get("duration_seconds", 0))
+                dur_str = format_precise_duration(dur_sec)
+                gross_tpnl = float(t.get("gross_trading_pnl", float(t.get("trading_pnl", 0)) + float(t.get("trading_fee", 3.0))))
+                fee = float(t.get("trading_fee", 3.0))
+                net_tpnl = float(t.get("trading_pnl", 0))
+                fpnl = float(t.get("funding_pnl", 0))
+                tot_pnl = float(t.get("total_net_pnl", 0))
+                roe_pct = float(t.get("net_roe_pct", t.get("net_pnl_pct", 0)))
+
                 closed_rows.append({
                     "平仓时间": format_timestamp(t.get("close_timestamp", 0), active_tz),
                     "标的": t.get("token", ""),
                     "交易方向": f"{t.get('side_1', '')} HL / {t.get('side_2', '')} BN",
+                    "持仓时长": dur_str,
                     "开仓基差": f"{float(t.get('entry_basis_pct', 0)):+.2%}",
                     "平仓基差": f"{float(t.get('close_basis_pct', 0)):+.2%}",
-                    "价差净利润": f"${float(t.get('trading_pnl', 0)):+,.2f}",
-                    "已结资金费": f"${float(t.get('funding_pnl', 0)):+,.2f}",
-                    "结算次数": f"{t.get('settlement_count', 0)} 次",
-                    "结清净收益": f"${float(t.get('total_net_pnl', 0)):+,.2f}",
-                    "收益率 (ROE)": f"{float(t.get('net_pnl_pct', 0)):+.2%}",
-                    "持仓时长": dur_str,
+                    "毛价差盈亏": f"${gross_tpnl:+,.2f}",
+                    "预估总手续费": f"-${fee:,.2f}",
+                    "价差净利润": f"${net_tpnl:+,.2f}",
+                    "已结资金费": f"${fpnl:+,.2f}",
+                    "跨越结算窗口": f"{t.get('settlement_count', 0)} 周期",
+                    "结清真实净利": f"${tot_pnl:+,.2f}",
+                    "真实本金 ROE": f"{roe_pct:+.2%}",
                     "平仓原因": t.get("close_reason", ""),
                 })
             df_closed = pd.DataFrame(closed_rows)
@@ -307,7 +350,7 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
                     "HL 日资金费率": f"{float(m.get('c1_funding_daily', 0)):+.3%}/d",
                     "BN 日资金费率": f"{float(m.get('c2_funding_daily', 0)):+.3%}/d",
                     "顺风利差预计": f"{float(m.get('carry_if_short_c1', 0)):+.3%}/d",
-                    "撮合撮合状态": m.get("dislocation_status", ""),
+                    "偏离撮合状态": m.get("dislocation_status", ""),
                 })
             df_radar = pd.DataFrame(radar_rows)
             st.dataframe(df_radar, use_container_width=True, hide_index=True)
