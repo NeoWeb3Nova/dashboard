@@ -17,6 +17,22 @@ def number(value):
         return None
 
 
+def market_data_issues(data):
+    issues=[];audit=data.get('audit',{})
+    for name,row in audit.get('public_connectors',{}).items():
+        count=row.get('configured_pairs')
+        if count is not None and (len(row.get('books_ready',[]))!=count or len(row.get('rules_ready',[]))!=count):
+            issues.append(name+'：新鲜盘口或交易规则不齐')
+    if 'watchlist' in data and len(data.get('market_comparison',[]))!=len(data['watchlist']):
+        issues.append('部分观察标的缺少可用费率元数据')
+    discovery=data.get('rotation_status',{}).get('discovery',{})
+    if discovery.get('rejections',{}).get('stale metadata',0):
+        issues.append('本轮存在过期元数据，扫描完成不代表行情健康')
+    if audit.get('data_refresh',{}).get('last_error'):
+        issues.append('最近一次公共费率刷新失败：'+str(audit['data_refresh']['last_error']))
+    return issues
+
+
 def instance_dir(bot_name, roots=None):
     if not isinstance(bot_name, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]*', bot_name):
         return None

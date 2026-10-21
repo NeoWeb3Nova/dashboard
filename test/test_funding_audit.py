@@ -9,6 +9,13 @@ from frontend.components.pnl_analytics import _parse_trades_dataframe, _calculat
 
 
 class FinancialDisplayTests(unittest.TestCase):
+    def setUp(self):
+        import frontend.components.funding_http as public_http
+        state_patch = patch.dict(public_http._blocked, clear=True)
+        file_patch = patch.object(public_http, 'BACKOFF_PATH', None)
+        state_patch.start(); file_patch.start()
+        self.addCleanup(state_patch.stop); self.addCleanup(file_patch.stop)
+
     def test_drawdown_includes_first_losing_trade_from_zero(self):
         trades = [dict(token='BTC', open_timestamp=100, close_timestamp=200+i,
                        trading_pnl=n, funding_pnl=0, total_net_pnl=n, position_size=1000,

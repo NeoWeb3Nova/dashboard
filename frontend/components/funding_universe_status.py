@@ -24,6 +24,8 @@ def render_discovery_status(arb_data, active_tz):
     enabled = discovery.get('enabled', rotation.get('auto_rotation_enabled'))
     phase = {'ready': '本轮完成', 'scanning': '扫描中', 'waiting': '等待数据',
              'unavailable': '扫描异常'}.get(discovery.get('phase'), '未上报')
+    if discovery.get('rejections', {}).get('stale metadata') and phase == '本轮完成':
+        phase = '扫描完成，但存在过期行情'
     if enabled is False:
         phase = '已暂停'
     st.markdown(f'**标的池自动发现与轮换**：`{phase}`')

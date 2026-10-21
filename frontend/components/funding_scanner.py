@@ -2,6 +2,7 @@ import json
 import urllib.request
 from typing import Dict, List, Optional
 import pandas as pd
+from frontend.components.funding_http import public_urlopen
 
 
 def fetch_binance_perpetual_funding_rates(timeout: int = 5) -> Dict[str, Dict]:
@@ -12,7 +13,7 @@ def fetch_binance_perpetual_funding_rates(timeout: int = 5) -> Dict[str, Dict]:
     try:
         t_url = "https://fapi.binance.com/fapi/v1/ticker/24hr"
         t_req = urllib.request.Request(t_url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(t_req, timeout=timeout) as resp:
+        with public_urlopen(t_req, timeout=timeout) as resp:
             t_data = json.loads(resp.read().decode())
             for item in t_data:
                 sym = item.get("symbol", "")
@@ -25,7 +26,7 @@ def fetch_binance_perpetual_funding_rates(timeout: int = 5) -> Dict[str, Dict]:
     # Only a successful fundingInfo response permits the eight-hour default.
     try:
         req = urllib.request.Request("https://fapi.binance.com/fapi/v1/fundingInfo", headers={"User-Agent": "Hummingbot-audit"})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with public_urlopen(req, timeout=timeout) as resp:
             intervals = {r["symbol"]: int(r["fundingIntervalHours"]) for r in json.load(resp)}
     except Exception:
         return {}  # Unknown schedules must not become apparently profitable signals.
@@ -34,7 +35,7 @@ def fetch_binance_perpetual_funding_rates(timeout: int = 5) -> Dict[str, Dict]:
     try:
         url = "https://fapi.binance.com/fapi/v1/premiumIndex"
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with public_urlopen(req, timeout=timeout) as resp:
             data = json.loads(resp.read().decode())
             for item in data:
                 symbol = item.get("symbol", "")
@@ -69,7 +70,7 @@ def fetch_hyperliquid_perpetual_funding_rates(timeout: int = 5) -> Dict[str, Dic
     )
     rates = {}
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with public_urlopen(req, timeout=timeout) as resp:
             data = json.loads(resp.read().decode())
             universe = data[0].get("universe", [])
             ctxs = data[1] if len(data) > 1 else []

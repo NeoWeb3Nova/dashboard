@@ -8,6 +8,8 @@ import streamlit as st
 from frontend.components.funding_scanner import scan_cross_exchange_opportunities
 from frontend.components.funding_config_ui import render_discovery_config
 from frontend.components.funding_contract import store_new_config
+from frontend.components.funding_http import public_rate_limits
+from frontend.components.timezone_utils import format_timestamp
 from frontend.components.timezone_utils import DEFAULT_TIMEZONE, TIMEZONE_CHOICES
 from frontend.st_utils import get_backend_api_client, initialize_st_page
 
@@ -138,6 +140,10 @@ def get_cached_opportunities(c1, c2):
 
 with st.spinner("🔍 正在扫描 Binance 与 Hyperliquid 实时资金费率..."):
     live_opps = get_cached_opportunities(connector_1, connector_2) if connector_1 != connector_2 else []
+
+for limited_host, limited_state in public_rate_limits().items():
+    st.warning(f"公开费率扫描已退避：{limited_host} 返回 HTTP {limited_state['status']}，"
+               f"记录的恢复检查时间为 {format_timestamp(limited_state['until'])}。刷新页面不会绕过退避。")
 
 top_opp_tokens = [o["coin"] for o in live_opps[:5]] if live_opps else ["BTC", "ETH", "SOL"]
 

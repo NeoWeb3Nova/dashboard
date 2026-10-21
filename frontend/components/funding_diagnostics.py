@@ -2,7 +2,7 @@
 import time
 import streamlit as st
 
-from frontend.components.funding_contract import load_instance_config,remaining_seconds,gross_notional,legs
+from frontend.components.funding_contract import load_instance_config,remaining_seconds,gross_notional,legs,market_data_issues
 from frontend.components.timezone_utils import format_timestamp
 
 
@@ -15,6 +15,8 @@ def render_data_status(data):
         st.warning(f"当前展示的是旧快照（距更新 {status['age_seconds']:.0f} 秒），不能当作实时持仓估值；控制请求已禁用。")
     if status.get('source'):
         st.caption(f"数据来源：{status['source']} · 距账本更新 {status['age_seconds']:.0f} 秒。")
+    for issue in market_data_issues(data):
+        st.warning('行情数据受限：'+issue+'。进程在运行不代表可以开仓。')
     pending=[p for p in data.get('active_positions',[])+data.get('closed_trades',[]) if p.get('funding_pending')]
     estimated=sum(bool(p.get('amount_estimated')) for r in data.get('active_positions',[])+data.get('closed_trades',[]) for p in r.get('funding_payments',[]))
     if pending:st.info(f'有 {len(pending)} 条持仓/平仓记录仍待补记资金费，净损益可能继续修订。')
