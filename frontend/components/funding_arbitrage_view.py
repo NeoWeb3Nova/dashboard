@@ -18,6 +18,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from frontend.components.clock_monitor import get_exchange_clock_health
+from frontend.components.funding_universe_status import no_rotation_message, render_discovery_status
 from frontend.components.market_links import get_official_market_url, get_token_research_urls
 from frontend.components.timezone_utils import (
     format_timestamp,
@@ -1139,28 +1140,19 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
 
     with tab_rates:
         rot_info = arb_data.get("rotation_status", {})
-        rot_enabled = rot_info.get("auto_rotation_enabled", True)
-        last_rot_ts = float(rot_info.get("last_rotation_timestamp", 0.0))
-        next_rot_ts = float(rot_info.get("next_rotation_timestamp", 0.0))
-        rot_int_m = int(rot_info.get("rotation_interval_minutes", 30))
-        min_apr_th = float(rot_info.get("min_apr_threshold", 0.35)) * 100.0
-        min_delta_th = float(rot_info.get("min_apr_delta", 0.40)) * 100.0
-
         # --- Section 1: Auto-Rotation Status & Control Console ---
         rot_c1, rot_c2, rot_c3 = st.columns([2.5, 2.0, 1.5])
         with rot_c1:
-            st.markdown(f"**🤖 标的池全自动轮换引擎 (Auto-Rotation)**: `{'🟢 运行中' if rot_enabled else '⏸️ 已暂停'}`")
-            last_str = format_timestamp(last_rot_ts, active_tz, "%H:%M:%S") if last_rot_ts > 0 else "尚未触发"
-            next_str = format_timestamp(next_rot_ts, active_tz, "%H:%M:%S") if next_rot_ts > 0 else "即将检测"
-            st.caption(f"每 **{rot_int_m} 分钟** 全网轮询 | 上次轮换: `{last_str}` | 下次预计: `{next_str}`")
+            render_discovery_status(arb_data, active_tz)
         with rot_c2:
-            st.markdown(f"**🎯 轮换门槛标准 (方案 B)**")
-            st.caption(f"最低准入: `APR ≥ {min_apr_th:.0f}%` | 换币差额: `ΔAPR ≥ {min_delta_th:.0f}%` *(回本<29h)*")
+            st.markdown("**轮换准入与替换条件**")
+            st.caption("新候选须通过完整成本、盘口深度及预算检查；"
+                       "池满时只替换符合条件的闲置标的，已有持仓继续保留。")
         with rot_c3:
             if st.button("⚡ 立即触发全网最优轮换", key=f"btn_rot_now_{bot_name}", use_container_width=True):
                 success = send_strategy_command(bot_name, {"action": "trigger_rotation"})
                 if success:
-                    st.toast("✅ 已向后台发送立即轮换指令！策略将在 5 秒内扫描并热更新标的池。")
+                    st.toast("✅ 已发送扫描请求；扫描和准入检查完成后，符合条件才会更新观察池。")
                     st.rerun()
                 else:
                     st.error("写入指令失败，请检查实例运行状态")
@@ -1310,7 +1302,7 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                         })
                     st.dataframe(pd.DataFrame(ev_rows), use_container_width=True, hide_index=True)
                 else:
-                    st.info("ℹ️ 暂无自动轮换事件记录（引擎每 30 分钟轮询一次全市场，遇到闲置低利差且外部高利差时将自动触发轮换）")
+                    st.info(no_rotation_message(rot_info))
         else:
             st.info("ℹ️ 正在连接交易所拉取实时费率对比数据...")
 
