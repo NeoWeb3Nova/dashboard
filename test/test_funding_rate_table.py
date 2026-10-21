@@ -65,5 +65,11 @@ class FundingRateTableTests(unittest.TestCase):
         r=funding_rate_rows(snapshot(.000006,.000001,.000005,_ui={'stale':True}))[0]
         self.assertEqual(r[SPREAD],.000005);self.assertEqual(r['入场状态'],'费率数据待刷新')
 
+    def test_fresh_funding_with_missing_books_is_not_trade_ready(self):
+        d=snapshot(audit={'public_connectors':{'binance_perpetual':{'books_ready':[], 'rules_ready':['BTC']}}})
+        r=funding_rate_rows(d)[0]
+        self.assertEqual(r['入场状态'],'盘口或规则未就绪，不能开仓')
+        self.assertEqual(r[SPREAD],.02)
+
 
 if __name__=='__main__':unittest.main()

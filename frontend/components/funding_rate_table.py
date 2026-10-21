@@ -60,6 +60,9 @@ def funding_rate_rows(data, now=None):
                  for field, key in [('quarantined_tokens', 'quarantine_until'),
                                     ('post_tp_lockout', 'lockout_until')]):
             status = '隔离或冷却中'
+        elif any(token not in state.get('books_ready', []) or token not in state.get('rules_ready', [])
+                 for state in audit.get('public_connectors', {}).values()):
+            status = '盘口或规则未就绪，不能开仓'
         elif threshold is None or threshold <= 0:
             status = '开仓门槛未确认'
         elif spread >= threshold:
