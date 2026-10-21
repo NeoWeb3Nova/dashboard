@@ -129,10 +129,10 @@ def render_basis_stat_arb_kpi_cards(arb_data, total_volume_traded=0.0):
     c1, c2, c3, c4, c5 = st.columns(5)
     with c1:
         st.metric(
-            "💼 真实实缴保证金",
+            "💼 真实实缴总保证金",
             f"${real_margin_total:,.2f}",
-            f"{leverage}x 杠杆质押 (单边 ${total_capital:,.2f})",
-            help="当前活跃基差套利在多空双边实缴的总保证金"
+            f"单边 ${total_capital:,.0f} | 双边 ${gross_capital:,.0f} ({leverage}x)",
+            help=f"当前活跃基差套利在两所实缴的总保证金。单边名义货值 ${total_capital:,.2f}，双边对冲总敞口 ${gross_capital:,.2f}，基于 {leverage}x 杠杆质押。"
         )
     with c2:
         st.metric(
@@ -146,9 +146,9 @@ def render_basis_stat_arb_kpi_cards(arb_data, total_volume_traded=0.0):
         st.metric(
             "📈 活跃持仓浮动净盈亏",
             f"${total_unrealized_pnl:+,.2f}",
-            f"正在收敛 {len(active_pos)} 仓位",
+            f"{len(active_pos)} 对仓位 | 双边货值 ${gross_capital:,.0f}",
             delta_color="normal",
-            help="当前活跃基差仓位的净浮动盈亏（已计入开平仓摩擦与动态价差，随盘口基差压缩动态更新）"
+            help="当前活跃基差仓位的净浮动盈亏（已计入开平仓4腿手续费摩擦与动态盘口价差，随盘口基差压缩动态更新）"
         )
     with c4:
         st.metric(
@@ -231,6 +231,18 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
                 curr_basis = float(p.get("current_basis_pct", 0.0))
                 target_comp = float(p.get("target_compression_pct", 0.0015))
                 pos_size = float(p.get("position_size", 0.0))
+                dual_notional = float(p.get("total_notional", pos_size * 2.0))
+                pos_lev = float(p.get("leverage", leverage))
+                tot_margin = float(p.get("total_margin", (pos_size / pos_lev) * 2.0 if pos_lev > 0 else pos_size * 2.0))
+                margin1 = float(p.get("margin_1", pos_size / pos_lev if pos_lev > 0 else pos_size))
+                margin2 = float(p.get("margin_2", pos_size / pos_lev if pos_lev > 0 else pos_size))
+
+                p1_entry = float(p.get("entry_price_1", 0.0))
+                p2_entry = float(p.get("entry_price_2", 0.0))
+                p1_curr = float(p.get("current_price_1", p1_entry))
+                p2_curr = float(p.get("current_price_2", p2_entry))
+                amt1 = float(p.get("amount_1", pos_size / p1_entry if p1_entry > 0 else 0.0))
+                amt2 = float(p.get("amount_2", pos_size / p2_entry if p2_entry > 0 else 0.0))
                 
                 # Full fee and PnL breakdown
                 unrealized = float(p.get("unrealized_trading_pnl", 0.0))
@@ -240,6 +252,7 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
                 carry = float(p.get("settled_funding_pnl", p.get("funding_income", 0.0)))
                 indicative_carry = float(p.get("indicative_accrued_carry", 0.0))
                 total_pos_net = net_unrealized + carry
+                roe_unrealized = float(p.get("unrealized_roe_pct", total_pos_net / tot_margin if tot_margin > 0 else 0.0))
                 
                 settle_cnt = int(p.get("settlement_count", 0))
                 side1 = p.get("side_1", "")
@@ -274,17 +287,31 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
                         </div>
                         <div style="text-align: right;">
                             <span style="font-size: 1.15rem; font-weight: 700; color: {pnl_color};">${total_pos_net:+,.2f}</span>
-                            <span style="font-size: 0.78rem; color: #94a3b8; margin-left: 6px;">(毛价差 ${gross_unrealized:+,.2f} | 扣手续费 -${fee_est:,.2f})</span>
+                            <span style="font-size: 0.82rem; font-weight: 600; color: {pnl_color}; margin-left: 6px;">(ROE {roe_unrealized:+.2%})</span>
+                            <div style="font-size: 0.75rem; color: #94a3b8;">毛价差 ${gross_unrealized:+,.2f} | 扣4腿手续费 -${fee_est:,.2f}</div>
                         </div>
                     </div>
+
+                    <!-- 资金与仓位规格明细面板 -->
+                    <div style="background: rgba(30, 41, 59, 0.45); border-radius: 8px; padding: 10px 14px; margin-top: 10px; border: 1px solid rgba(255, 255, 255, 0.05);">
+                        <div style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 0.84rem; color: #f1f5f9;">
+                            <span>💰 单边名义货值: <b style="color:#38bdf8;">${pos_size:,.2f}</b></span>
+                            <span>🌐 双边总敞口: <b style="color:#a78bfa;">${dual_notional:,.2f}</b> <small style="color:#94a3b8;">(2 × 单边)</small></span>
+                            <span>🛡️ 实缴总保证金: <b style="color:#fbbf24;">${tot_margin:,.2f}</b> <small style="color:#94a3b8;">({pos_lev:.0f}x 杠杆)</small></span>
+                            <span>💳 预估4腿手续费: <b style="color:#f87171;">-${fee_est:,.2f}</b></span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 0.78rem; color: #cbd5e1; margin-top: 6px; border-top: 1px dashed rgba(255, 255, 255, 0.1); padding-top: 6px;">
+                            <span>🔹 腿1 ({c1}): <b>{side1} {amt1:,.4f} {tok}</b> @ 开仓 ${p1_entry:.4f} (当前 ${p1_curr:.4f} | 货值 ${pos_size:,.2f} | 押金 ${margin1:,.2f})</span>
+                            <span>🔸 腿2 ({c2}): <b>{side2} {amt2:,.4f} {tok}</b> @ 开仓 ${p2_entry:.4f} (当前 ${p2_curr:.4f} | 货值 ${pos_size:,.2f} | 押金 ${margin2:,.2f})</span>
+                        </div>
+                    </div>
+
                     <div style="display: flex; justify-content: space-between; margin-top: 10px; font-size: 0.82rem; color: #cbd5e1; flex-wrap: wrap; gap: 6px;">
                         <span>开仓基差: <b>{entry_basis:+.2%}</b></span>
                         <span>当前实时基差: <b>{curr_basis:+.2%}</b></span>
                         <span>目标止盈线: <b>≤ ±{target_comp:.2%}</b></span>
-                        <span>预估4腿手续费: <b style="color: #f87171;">-${fee_est:,.2f}</b></span>
                         <span>已结资金费: <b style="color: #10b981;">+${carry:.2f}</b> <small style="color:#94a3b8;">({settle_cnt}周期)</small></span>
                         <span>待结预估: <small style="color:#94a3b8;">+${indicative_carry:.2f}</small></span>
-                        <span>单边货值: <b>${pos_size:,.0f}</b></span>
                     </div>
                     <div style="margin-top: 8px;">
                         <div style="display: flex; justify-content: space-between; font-size: 0.72rem; color: #94a3b8; margin-bottom: 2px;">
@@ -312,12 +339,25 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
                 fpnl = float(t.get("funding_pnl", 0))
                 tot_pnl = float(t.get("total_net_pnl", 0))
                 roe_pct = float(t.get("net_roe_pct", t.get("net_pnl_pct", 0)))
+                
+                pos_size_val = float(t.get("position_size", 1500.0))
+                dual_notional_val = float(t.get("total_notional", pos_size_val * 2.0))
+                lev_val = float(t.get("leverage", 3.0))
+                margin_val = float(t.get("total_margin", (pos_size_val / lev_val) * 2.0 if lev_val > 0 else pos_size_val * 2.0))
+                p1_ent = float(t.get("entry_price_1", 0.0))
+                p2_ent = float(t.get("entry_price_2", 0.0))
+                amt_1 = float(t.get("amount_1", pos_size_val / p1_ent if p1_ent > 0 else 0.0))
+                amt_2 = float(t.get("amount_2", pos_size_val / p2_ent if p2_ent > 0 else 0.0))
 
                 closed_rows.append({
                     "平仓时间": format_timestamp(t.get("close_timestamp", 0), active_tz),
                     "标的": t.get("token", ""),
                     "交易方向": f"{t.get('side_1', '')} HL / {t.get('side_2', '')} BN",
                     "持仓时长": dur_str,
+                    "开仓币数 (HL/BN)": f"{amt_1:,.2f} / {amt_2:,.2f}",
+                    "单边货值": f"${pos_size_val:,.2f}",
+                    "双边总敞口": f"${dual_notional_val:,.2f}",
+                    "实缴保证金": f"${margin_val:,.2f} ({lev_val:.0f}x)",
                     "开仓基差": f"{float(t.get('entry_basis_pct', 0)):+.2%}",
                     "平仓基差": f"{float(t.get('close_basis_pct', 0)):+.2%}",
                     "毛价差盈亏": f"${gross_tpnl:+,.2f}",

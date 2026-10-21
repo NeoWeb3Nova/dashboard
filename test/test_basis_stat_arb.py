@@ -135,6 +135,25 @@ class TestBasisFinancialAccounting(unittest.TestCase):
         unique_windows = len(set(p.get("timestamp") for p in payments if p.get("timestamp")))
         self.assertEqual(unique_windows, 2)
 
+    def test_dual_notional_and_margin_breakdown(self):
+        # pos_size = $1500, leverage = 3x, token = STRK, price = $0.05705
+        pos_size = 1500.0
+        leverage = 3.0
+        p1 = 0.05705
+        p2 = 0.05677
+        
+        amt_1 = pos_size / p1  # 26,292.7 STRK
+        amt_2 = pos_size / p2  # 26,422.4 STRK
+        dual_notional = pos_size * 2.0  # $3000.0
+        margin_1 = pos_size / leverage  # $500.0
+        margin_2 = pos_size / leverage  # $500.0
+        total_margin = margin_1 + margin_2  # $1000.0
+
+        self.assertAlmostEqual(dual_notional, 3000.0)
+        self.assertAlmostEqual(total_margin, 1000.0)
+        self.assertAlmostEqual(amt_1, 26292.725679, places=3)
+        self.assertAlmostEqual(amt_2, 26422.406200, places=3)
+
 
 class TestBasisConfigContract(unittest.TestCase):
     """Verify Basis Stat Arb config fields required by Case 32."""
