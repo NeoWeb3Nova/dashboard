@@ -17,6 +17,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+from frontend.components.funding_rate_table import render_funding_rate_table
 from frontend.components.funding_contract import legs, gross_notional, request_command, select_snapshot, load_instance_config
 from frontend.components.funding_diagnostics import render_data_status, render_risk_status, render_execution_diagnostics
 from frontend.components.clock_monitor import get_exchange_clock_health
@@ -981,60 +982,8 @@ def render_funding_arbitrage_tables(arb_data, bot_name):
                     st.error("写入指令失败，请检查实例运行状态")
 
         st.markdown("---")
-        thresh_pct = arb_data.get("min_funding_rate_profitability_pct", 0.1)
-        st.caption(f"ℹ️ 策略后台实时维护的各币种利差对比（当前设定开仓门槛：日化利差 ≥ {thresh_pct:+.4f}% / 天 | 当前显示时区：{tz_label}）")
+        render_funding_rate_table(arb_data, bot_name, active_tz)
         if market_comp:
-            active_tokens_set = {p.get("token") for p in active_pos}
-            quarantined_dict = arb_data.get("quarantined_tokens", {})
-            perm_bl_set = set(arb_data.get("permanent_blacklist", []))
-            post_tp_set = set(arb_data.get("post_tp_lockout", {}).keys())
-            rates_rows = []
-            for m in market_comp:
-                tok = m.get("token", "")
-                daily_diff = m.get('daily_rate_diff_pct', 0)
-                apr_val = daily_diff * 365
-                apr_str = f"{apr_val:+.2f}%" if abs(apr_val) < 10000 else f"{apr_val:+.2e}%"
-
-                # Status
-                if tok in active_tokens_set:
-                    status_badge = "🟢 活跃持仓中"
-                elif tok in perm_bl_set:
-                    status_badge = "🚫 永久拉黑毒币"
-                elif tok in post_tp_set:
-                    status_badge = "🔒 止盈防追高锁定"
-                elif tok in quarantined_dict:
-                    status_badge = "🛑 动态隔离中"
-                elif daily_diff >= thresh_pct:
-                    status_badge = "✅ 利差达标(候选)"
-                else:
-                    status_badge = f"⏳ 观望中 (差 {(thresh_pct - daily_diff):.4f}%)"
-
-                bn_url = get_official_market_url("binance_perpetual", tok)
-                hl_url = get_official_market_url("hyperliquid_perpetual", tok)
-                res_url = get_token_research_urls(tok)["coinglass"]
-                row = {
-                    "监控币种": tok,
-                    "持仓状态": status_badge,
-                    "币安官方K线": bn_url,
-                    "HL官方盘口": hl_url,
-                    "代币官网与资料": res_url,
-                    "推荐套利组合 (Path)": m.get("best_path", "N/A"),
-                    "折算日化利差 (Daily Diff)": f"{daily_diff:+.4f}% / 天" if abs(daily_diff) < 1000 else f"{daily_diff:+.2e}% / 天",
-                    "折算年化利差 (APR)": apr_str,
-                }
-                for k, v in m.items():
-                    if k.endswith("_rate_daily"):
-                        c_title = k.replace("_rate_daily", "")
-                        v_str = f"{v:+.4f}%" if abs(v) < 1000 else f"{v:+.2e}%"
-                        row[f"{c_title} 费率 (日化)"] = v_str
-                rates_rows.append(row)
-            rates_col_cfg = {
-                "币安官方K线": st.column_config.LinkColumn("币安官方K线", display_text="🟡 币安K线 ↗"),
-                "HL官方盘口": st.column_config.LinkColumn("HL官方盘口", display_text="🟢 HL盘口 ↗"),
-                "代币官网与资料": st.column_config.LinkColumn("代币官网与资料", display_text="🌐 官网资料 ↗"),
-            }
-            st.dataframe(pd.DataFrame(rates_rows), use_container_width=True, hide_index=True, column_config=rates_col_cfg)
-
             # --- Section 2: Quick Watchlist Management Controller ---
             watched_toks = [t for t in arb_data.get("watchlist", [m.get("token") for m in market_comp]) if t not in {p.get("token") for p in active_pos}]
             st.markdown("##### 🎛️ 监控池快捷管理与热配置控制台")

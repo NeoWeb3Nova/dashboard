@@ -3,6 +3,7 @@ import time
 import streamlit as st
 
 from frontend.components.funding_contract import load_instance_config,remaining_seconds,gross_notional,legs,market_data_issues
+from frontend.components.funding_rate_table import funding_rate_rows, SPREAD
 from frontend.components.timezone_utils import format_timestamp
 
 
@@ -74,9 +75,9 @@ def render_execution_diagnostics(data,bot_name,active_tz):
     st.caption('安全容量由两所开仓和退出方向的实际盘口共同约束。24h 成交额不能替代盘口，也不能据此给出安全下单额度。')
     market=data.get('market_comparison',[])
     if market:
-        st.dataframe([{'标的':m['token'],'预测日费差（%）':m.get('daily_rate_diff_pct'),
-                       '候选方向（做多→做空）':m.get('best_path','无有效费差')}
-                      for m in market],hide_index=True)
+        st.dataframe([{'标的': row['币种'], '预测毛日费差（%）': row[SPREAD],
+                       '预测做多': row['预测做多'], '预测做空': row['预测做空'], '数据核对': row['数据核对']}
+                      for row in funding_rate_rows(data)], hide_index=True)
     positions=data.get('active_positions',[])
     if positions:
         rows=[]
