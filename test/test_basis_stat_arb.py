@@ -183,5 +183,57 @@ class TestBasisConfigContract(unittest.TestCase):
         self.assertGreaterEqual(config["min_entry_basis_pct"], 0.0022)  # Above friction barrier
 
 
+class TestBasisRendering(unittest.TestCase):
+    """Verify Streamlit UI rendering of Basis Stat Arb tables with active and closed trades."""
+
+    def test_render_basis_tables_with_active_position(self):
+        from streamlit.testing.v1 import AppTest
+        code = '''
+import frontend.components.basis_stat_arb_view as view
+data = {
+    "strategy": "basis_stat_arb",
+    "is_dry_run": True,
+    "active_positions": [{
+        "token": "SAGA",
+        "position_size": 1500.0,
+        "entry_price_1": 0.0201,
+        "entry_price_2": 0.0200,
+        "current_price_1": 0.0201,
+        "current_price_2": 0.0200,
+        "unrealized_trading_pnl": 0.0,
+        "trading_fee": 3.0,
+        "duration_seconds": 120,
+        "connector_1": "hyperliquid_perpetual",
+        "connector_2": "binance_perpetual",
+        "side_1": "SELL",
+        "side_2": "BUY",
+        "entry_basis_pct": 0.0035,
+        "current_basis_pct": 0.0030,
+    }],
+    "closed_trades": [{
+        "token": "STRK",
+        "position_size": 1500.0,
+        "entry_price_1": 0.057,
+        "entry_price_2": 0.056,
+        "close_price_1": 0.0565,
+        "close_price_2": 0.0565,
+        "trading_pnl": 3.5,
+        "trading_fee": 3.0,
+        "total_net_pnl": 3.5,
+        "funding_pnl": 0.0,
+        "duration_seconds": 1400,
+        "side_1": "BUY",
+        "side_2": "SELL",
+        "close_reason": "take_profit",
+        "close_timestamp": 1729500000,
+    }],
+    "market_comparison": [],
+}
+view.render_basis_stat_arb_tables(data, "test-bot")
+'''
+        app = AppTest.from_string(code, default_timeout=20).run()
+        self.assertFalse(app.exception, [r.value for r in app.exception])
+
+
 if __name__ == "__main__":
     unittest.main()

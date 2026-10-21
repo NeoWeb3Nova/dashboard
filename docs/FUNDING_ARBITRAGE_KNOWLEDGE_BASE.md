@@ -59,3 +59,13 @@
 3. **测试验证与回归**：新增 `test_dual_notional_and_margin_breakdown`，全量 60 项回归通过。
 
 
+## 2026-10-21 21:10：基差活跃持仓看板作用域 NameError 修复与端到端渲染回归 (v2.4.3)
+
+现场排查并修复活跃持仓开启后 Instances 页面报 `An error occurred while fetching bot status: name 'leverage' is not defined` 的偶发异常：
+1. **作用域变量逃逸根因**：`basis_stat_arb_view.py` 的 `render_basis_stat_arb_tables` 在空仓状态下 `for p in active_pos` 循环不执行；但当 SAGA 仓位真实触发入场后，循环内部执行 `pos_lev = float(p.get("leverage", leverage))` 时因函数顶层未定义 `leverage` 导致抛出 `NameError`；
+2. **多层防御与兜底**：
+   - 在 `get_bot_basis_stat_arb_data` 与 `render_basis_stat_arb_tables` 函数顶层安全提取 `leverage = float(arb_data.get("leverage") or 3.0)` 并施加 `<=0` 防除零兜底；
+3. **AppTest 端到端渲染测试注入**：在 `test_basis_stat_arb.py` 增设 `TestBasisRendering`，使用 `streamlit.testing.v1.AppTest` 完整模拟包含真实活跃持仓与历史平仓的 UI 渲染生命周期，全量 61 项测试 100% 通过。
+
+
+

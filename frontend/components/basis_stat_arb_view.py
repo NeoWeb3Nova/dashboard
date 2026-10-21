@@ -88,10 +88,13 @@ def get_bot_basis_stat_arb_data(bot_name, performance):
         arb_data = {
             "strategy": "basis_stat_arb",
             "is_dry_run": True,
+            "leverage": 3,
             "active_positions": [],
             "closed_trades": [],
             "market_comparison": []
         }
+    elif arb_data and "leverage" not in arb_data:
+        arb_data["leverage"] = 3
 
     return is_basis_stat_arb_bot, arb_data
 
@@ -100,7 +103,9 @@ def render_basis_stat_arb_kpi_cards(arb_data, total_volume_traded=0.0):
     """Render top institutional KPI summary for Basis Stat Arb Engine."""
     active_pos = arb_data.get("active_positions", [])
     closed_trades = arb_data.get("closed_trades", [])
-    leverage = int(arb_data.get("leverage", 3))
+    leverage = int(arb_data.get("leverage") or 3)
+    if leverage <= 0:
+        leverage = 3
 
     total_capital = sum(float(p.get("position_size", 0)) for p in active_pos)
     gross_capital = total_capital * 2.0
@@ -173,6 +178,9 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
     closed_trades = arb_data.get("closed_trades", [])
     market_comp = arb_data.get("market_comparison", [])
     is_dry_run = arb_data.get("is_dry_run", True)
+    leverage = float(arb_data.get("leverage", 3.0))
+    if leverage <= 0:
+        leverage = 3.0
 
     mode_badge = "🟢 纸面预演 (Dry-Run)" if is_dry_run else "🔴 实盘交易 (Live)"
 
@@ -232,7 +240,9 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
                 target_comp = float(p.get("target_compression_pct", 0.0015))
                 pos_size = float(p.get("position_size", 0.0))
                 dual_notional = float(p.get("total_notional", pos_size * 2.0))
-                pos_lev = float(p.get("leverage", leverage))
+                pos_lev = float(p.get("leverage") or leverage)
+                if pos_lev <= 0:
+                    pos_lev = 1.0
                 tot_margin = float(p.get("total_margin", (pos_size / pos_lev) * 2.0 if pos_lev > 0 else pos_size * 2.0))
                 margin1 = float(p.get("margin_1", pos_size / pos_lev if pos_lev > 0 else pos_size))
                 margin2 = float(p.get("margin_2", pos_size / pos_lev if pos_lev > 0 else pos_size))
@@ -342,7 +352,9 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
                 
                 pos_size_val = float(t.get("position_size", 1500.0))
                 dual_notional_val = float(t.get("total_notional", pos_size_val * 2.0))
-                lev_val = float(t.get("leverage", 3.0))
+                lev_val = float(t.get("leverage") or leverage)
+                if lev_val <= 0:
+                    lev_val = 1.0
                 margin_val = float(t.get("total_margin", (pos_size_val / lev_val) * 2.0 if lev_val > 0 else pos_size_val * 2.0))
                 p1_ent = float(t.get("entry_price_1", 0.0))
                 p2_ent = float(t.get("entry_price_2", 0.0))
