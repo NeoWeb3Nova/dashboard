@@ -490,6 +490,78 @@ view.render_basis_stat_arb_tables(data, "test-bot")
         dym_row = df_radar[df_radar["标的"] == "DYM"].iloc[0]
         self.assertIn("流动性虚幻", dym_row["偏离撮合状态"])
 
+    def test_dynamic_rotation_tabs_render(self):
+        """Verify that discovery candidates and rotation history render properly."""
+        from streamlit.testing.v1 import AppTest
+        code = '''
+import streamlit as st
+from frontend.components import basis_stat_arb_view as view
+
+data = {
+    "strategy": "basis_stat_arb",
+    "is_dry_run": True,
+    "leverage": 3,
+    "active_positions": [],
+    "closed_trades": [],
+    "market_comparison": [],
+    "market_discovery_candidates": [
+        {
+            "token": "SOPH",
+            "is_active": False,
+            "basis_pct": 0.0085,
+            "hl_price": 0.0017,
+            "bn_price": 0.001685,
+            "hl_volume_24h": 600000.0,
+            "bn_volume_24h": 9400000.0,
+            "min_volume_24h": 600000.0,
+            "dwell_seconds": 0,
+            "scanned_at": "2026-10-22 14:00:00 UTC",
+        },
+        {
+            "token": "BTC",
+            "is_active": True,
+            "basis_pct": 0.0001,
+            "hl_price": 68000.0,
+            "bn_price": 67990.0,
+            "hl_volume_24h": 50000000.0,
+            "bn_volume_24h": 200000000.0,
+            "min_volume_24h": 50000000.0,
+            "dwell_seconds": 3600,
+            "scanned_at": "2026-10-22 14:00:00 UTC",
+        }
+    ],
+    "rotation_history": [
+        {
+            "time_str": "2026-10-22 13:30:00 UTC",
+            "evicted_token": "LTC",
+            "admitted_token": "AERO",
+            "evicted_basis_pct": 0.0002,
+            "admitted_basis_pct": 0.0088,
+            "delta_edge_pct": 0.0086,
+            "admitted_volume_usd": 7300000.0,
+            "reason": "Dynamic Hot-Swap: AERO replaces idle LTC",
+        }
+    ]
+}
+view.render_basis_stat_arb_tables(data, "test-bot")
+'''
+        app = AppTest.from_string(code, default_timeout=20).run()
+        self.assertFalse(app.exception, [r.value for r in app.exception])
+        self.assertTrue(len(app.dataframe) >= 2)
+        df_disc = app.dataframe[0].value
+        self.assertIn("理论基差", df_disc.columns)
+        self.assertIn("状态", df_disc.columns)
+        # Check SOPH qualified badge
+        soph_row = df_disc[df_disc["标的"] == "SOPH"].iloc[0]
+        self.assertIn("达标待命", soph_row["状态"])
+
+        # Check rotation history
+        df_rot = app.dataframe[1].value
+        self.assertIn("淘汰标的", df_rot.columns)
+        self.assertIn("引入新标的", df_rot.columns)
+        self.assertEqual(df_rot.iloc[0]["淘汰标的"], "LTC")
+        self.assertEqual(df_rot.iloc[0]["引入新标的"], "AERO")
+
 
 if __name__ == "__main__":
     unittest.main()

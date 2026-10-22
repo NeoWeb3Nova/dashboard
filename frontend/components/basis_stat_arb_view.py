@@ -123,7 +123,9 @@ def get_bot_basis_stat_arb_data(bot_name, performance):
             "leverage": 3,
             "active_positions": [],
             "closed_trades": [],
-            "market_comparison": []
+            "market_comparison": [],
+            "market_discovery_candidates": [],
+            "rotation_history": [],
         }
     elif arb_data and "leverage" not in arb_data:
         arb_data["leverage"] = 3
@@ -259,6 +261,8 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
     active_pos = arb_data.get("active_positions", [])
     closed_trades = arb_data.get("closed_trades", [])
     market_comp = arb_data.get("market_comparison", [])
+    discovery_candidates = arb_data.get("market_discovery_candidates", [])
+    rotation_history = arb_data.get("rotation_history", [])
     is_dry_run = arb_data.get("is_dry_run", True)
     leverage = float(arb_data.get("leverage", 3.0))
     if leverage <= 0:
@@ -301,10 +305,12 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
     else:
         st.markdown(dock_banner_html, unsafe_allow_html=True)
 
-    tab_active, tab_closed, tab_radar = st.tabs([
+    tab_active, tab_closed, tab_radar, tab_discovery, tab_rotation = st.tabs([
         f"⚡ 活跃基差持仓  [{len(active_pos)} 仓位]",
         f"📜 均值回归战绩  [{len(closed_trades)} 笔已结算]",
-        f"📡 全市场基差雷达  [{len(market_comp)} 标的监控]",
+        f"🎯 在役撮合池  [{len(market_comp)} 标的监控]",
+        f"🔭 全网寻优雷达  [{len(discovery_candidates)} 标的巡检]",
+        f"🔄 动态换血记录  [{len(rotation_history)} 次轮换]",
     ])
 
     with tab_active:
@@ -539,3 +545,62 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
                 })
             df_radar = pd.DataFrame(radar_rows)
             st.dataframe(df_radar, use_container_width=True, hide_index=True)
+
+    with tab_discovery:
+        st.markdown("##### 🔭 全网待命寻优雷达 (Tier 1 REST Background Discovery)")
+        st.caption("后台轻量 REST 巡检 Binance 与 Hyperliquid 全量 185+ 永续合约标的。一旦发现盘口偏离 ≥ 0.70% 且 24h 成交量达标的优质标的，系统将智能淘汰在役池中基差最低的僵尸代币，动态热插拔吸纳新标的。")
+        if not discovery_candidates:
+            st.info("ℹ️ 全网寻优引擎正在后台执行轻量 REST 巡检（约 3 分钟一轮），请稍候刷新...")
+        else:
+            cand_rows = []
+            for c in discovery_candidates:
+                is_act = c.get("is_active", False)
+                basis = float(c.get("basis_pct", 0.0))
+                hl_vol = float(c.get("hl_volume_24h", 0.0))
+                bn_vol = float(c.get("bn_volume_24h", 0.0))
+                min_vol = float(c.get("min_volume_24h", min(hl_vol, bn_vol)))
+
+                # Eligibility status
+                if is_act:
+                    status_badge = "🛡️ 在役护城河 (ACTIVE)"
+                elif abs(basis) >= 0.0070 and bn_vol >= 2000000.0 and hl_vol >= 500000.0:
+                    status_badge = "⚡ 达标待命 (QUALIFIED)"
+                elif abs(basis) >= 0.0070:
+                    status_badge = "⚠️ 费率偏离 (流动性不足)"
+                else:
+                    status_badge = "⏳ 观察中 (STANDBY)"
+
+                cand_rows.append({
+                    "标的": c.get("token", ""),
+                    "状态": status_badge,
+                    "理论基差": f"{basis:+.2%}",
+                    "HL 价格": f"${float(c.get('hl_price', 0)):,.4f}",
+                    "BN 价格": f"${float(c.get('bn_price', 0)):,.4f}",
+                    "HL 24h成交量": f"${hl_vol/1e6:,.2f}M",
+                    "BN 24h成交量": f"${bn_vol/1e6:,.2f}M",
+                    "在役驻留时长": f"{c.get('dwell_seconds', 0)//60} 分钟" if is_act else "-",
+                    "最新巡检时间": c.get("scanned_at", ""),
+                })
+            df_cand = pd.DataFrame(cand_rows)
+            st.dataframe(df_cand, use_container_width=True, hide_index=True)
+
+    with tab_rotation:
+        st.markdown("##### 🔄 动态换血轮换记录 (Universe Rotation History Ledger)")
+        st.caption("记录前台 48 席位与后台 185 待命池之间的动态热插拔轮换记录。严格遵守持仓免疫、30分钟驻留保护与 30 bps 净优势门槛。")
+        if not rotation_history:
+            st.info("ℹ️ 暂无动态轮换记录。当前 48 个在役标的运行良好；一旦出现高偏离热点脉冲标的，系统将在此自动登记轮换日志。")
+        else:
+            rot_rows = []
+            for r in reversed(rotation_history):
+                rot_rows.append({
+                    "轮换时间": r.get("time_str", ""),
+                    "淘汰标的": r.get("evicted_token", ""),
+                    "淘汰时基差": f"{float(r.get('evicted_basis_pct', 0)):.2%}",
+                    "引入新标的": r.get("admitted_token", ""),
+                    "新标的基差": f"{float(r.get('admitted_basis_pct', 0)):.2%}",
+                    "脉冲优势 (Δ)": f"{float(r.get('delta_edge_pct', 0)):+.2%}",
+                    "新标的24h成交量": f"${float(r.get('admitted_volume_usd', 0))/1e6:,.2f}M",
+                    "轮换原因": r.get("reason", ""),
+                })
+            df_rot = pd.DataFrame(rot_rows)
+            st.dataframe(df_rot, use_container_width=True, hide_index=True)
