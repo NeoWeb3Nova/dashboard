@@ -517,11 +517,21 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
                 p2_val = float(m.get('price_2', 0))
                 p1_str = f"${p1_val:,.4f}" if p1_val > 0 else "N/A"
                 p2_str = f"${p2_val:,.4f}" if p2_val > 0 else "N/A"
+                c1_depth = float(m.get('c1_top3_depth', 0))
+                c2_depth = float(m.get('c2_top3_depth', 0))
+                safe_cap = float(m.get('safe_capacity', 0))
+                net_edge_val = m.get('net_executable_edge_pct')
+                net_edge_str = f"{float(net_edge_val):+.3%}" if net_edge_val is not None else "N/A"
+                
                 radar_rows.append({
                     "标的": m.get("token", ""),
                     "Hyperliquid 价格": p1_str,
                     "Binance 价格": p2_str,
-                    "可成交基差偏离率": f"{float(m.get('basis_spread_pct', 0)):+.3%}",
+                    "HL Top3深度": f"${c1_depth:,.0f}" if c1_depth > 0 else "N/A",
+                    "BN Top3深度": f"${c2_depth:,.0f}" if c2_depth > 0 else "N/A",
+                    "安全定额容量": f"${safe_cap:,.0f}" if safe_cap > 0 else "N/A",
+                    "可成交基差": f"{float(m.get('basis_spread_pct', 0)):+.3%}",
+                    "VWAP 净空间": net_edge_str,
                     "HL 日资金费率": f"{float(m.get('c1_funding_daily', 0)):+.3%}/d",
                     "BN 日资金费率": f"{float(m.get('c2_funding_daily', 0)):+.3%}/d",
                     "顺风利差预计": f"{float(m.get('carry_if_short_c1', 0)):+.3%}/d",

@@ -1034,6 +1034,37 @@ $$Size_{quote} = \min\left(Size_{target}, \sum_{k=1}^{25} (P_k \times Q_k)_{c1} 
    - 在 `hummingbot-dashboard/test/test_basis_stat_arb.py` 中新增 `test_active_position_dynamic_duration_and_lock_badge` 测试；
    - 全量回归测试 100% 通过（前端 17/17 项，API 9/9 项）。
 
+---
+
+### 33. 订单簿可执行 VWAP 穿透门禁与动态容量定额（数字孪生彻底杜绝流动性陷阱）
+- **现象与实战复盘**：
+  - 用户深度审计指出：Paper Trade 在大币深盘（BTC/ETH/SOL）与山寨浅盘（SAGA/STRK/DYM）上的表现天差地别。
+  - 实测 Binance 与 Hyperliquid 均为订单簿（CLOB）性质：
+    - **大市值主流币**（BTC/ETH/SOL）：Binance L1 深度达 \$270k~\$1M，Hyperliquid L1 深度达 \$4k~\$80k，\$1,500 吃单深度滑点为 **0.00 bps**，但做市商竞争激烈，跨所常态基差常年在 ±0.02% 内，极少出现 ≥ 0.70% 套利波段。
+    - **长尾山寨币**（SAGA/STRK/DYM）：频现 0.40%~0.80% 甚至更大基差脉冲，但 Hyperliquid 盘口挂单往往只有几百美元。例如 SAGA Hyperliquid L1 仅 \$466，STRK 仅 \$266，DYM 盘口极度稀薄。
+  - **流动性诅咒（Liquidity Paradox）**：若无前置订单簿穿透门禁，用固定 \$1,500 市价单硬砸，必然吃穿多档，把纸面利润瞬间变成巨额亏损！在旧版 0.32% 门槛下，策略盈亏平衡致死临界点仅为 **4.6 bps/腿**；若不约束深度，一进一出 4 腿往返滑点可达 10~30 bps，上实盘必死无疑。
+- **解决方案与核心工程落地**：
+  1. **前置订单簿可执行 VWAP 穿透门禁（Executable VWAP Filter）**：
+     - 开仓前必须遍历 L2 OrderBook 深度快照，基于真实吃单深度计算双边腿的加权成交均价（VWAP）与单腿滑点：
+       $$\text{Executable VWAP Basis} = \frac{|\text{VWAP}_1 - \text{VWAP}_2|}{\min(\text{VWAP}_1, \text{VWAP}_2)}$$
+       $$\text{Roundtrip Friction} = \text{4腿吃单佣金 (20 bps)} + \text{4腿公网时延 (8 bps)} + \text{预期平仓深度滑点}$$
+       $$\text{Net Executable Edge} = \text{Executable VWAP Basis} - \text{Roundtrip Friction}$$
+     - **双重硬性拦截（Liquidity Mirage Intercept）**：
+       - `单腿深度滑点 > max_executable_depth_slippage_pct`（默认 25 bps）：坚决拦截并记录 `[LIQUIDITY-MIRAGE-INTERCEPT]`；
+       - `真实净利空间 Net Edge < min_executable_net_edge_pct`（默认 30 bps）：坚决拦截，不打无把握之仗。
+  2. **动态容量定额算法（Dynamic Capacity Sizing）**：
+     - 开仓额自适应：采集双边 Top 3 档累计深度，开仓额限制在浅盘侧 Top 3 深度的 20% 安全容量内：
+       $$\text{Safe Capacity} = \min(\text{position\_size\_quote}, \max(\text{min\_order\_size\_quote}, \text{MinTop3Depth} \times 20\%))$$
+     - 浅盘自动降额度至 \$300~\$800 锁定近 0 滑点，深盘自动放大至 \$1,500+；
+     - 极薄盘口防御：若浅盘侧 Top 3 累计深度低于最低起投金额（\$300.0），坚决不开仓（`depth < min_order_size_quote` 触发拦截）。
+  3. **前端雷达全链路数字孪生（Transparent Radar View）**：
+     - 在 Dashboard 的 `全市场基差雷达` 表格中新增实时透出字段：`HL Top3深度`、`BN Top3深度`、`安全定额容量`、`VWAP 净空间`；
+     - 真实对齐 Paper Trade 模拟盘与 Live 实盘，达到“接近无风险才开仓、无风险才能安全放大资金”的终极目标。
+- **验证结论与回归数据**：
+  - 测试套件全量通过：`hummingbot-dashboard` 21 项（总计 69 项）与 `hummingbot-api` 9 项回归测试 100% 通过；
+  - 容器热重载验证：48 对标的平稳加载，STRK/TAO/TIA 实时计算安全容量（如 TIA Binance Top3 仅 \$1,009 自动限制为 \$300 安全定额），VWAP 净空间透明可查。
+
+
 
 
 

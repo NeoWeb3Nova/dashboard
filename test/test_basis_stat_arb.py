@@ -265,13 +265,71 @@ class TestBasisConfigContract(unittest.TestCase):
             "taker_fee_rate": 0.0005,
             "simulated_latency_slippage_pct": 0.0002,
             "settlement_blackout_seconds": 60,
+            "dynamic_capacity_sizing": True,
+            "min_order_size_quote": 300.0,
+            "min_executable_net_edge_pct": 0.0030,
+            "max_executable_depth_slippage_pct": 0.0025,
         }
         self.assertEqual(config["min_holding_seconds"], 60)
         self.assertEqual(config["exit_persistence_ticks"], 2)
         self.assertEqual(config["taker_fee_rate"], 0.0005)
         self.assertEqual(config["simulated_latency_slippage_pct"], 0.0002)
         self.assertEqual(config["settlement_blackout_seconds"], 60)
+        self.assertTrue(config["dynamic_capacity_sizing"])
+        self.assertEqual(config["min_order_size_quote"], 300.0)
+        self.assertEqual(config["min_executable_net_edge_pct"], 0.0030)
+        self.assertEqual(config["max_executable_depth_slippage_pct"], 0.0025)
         self.assertGreaterEqual(config["min_entry_basis_pct"], 0.0022)  # Above friction barrier
+
+
+class TestDynamicCapacityAndVWAPGate(unittest.TestCase):
+    """Verify Executable VWAP Filter and Dynamic Capacity Sizing algorithms."""
+
+    def test_dynamic_capacity_sizing_formula(self):
+        ratio = Decimal("0.20")
+        min_sz = Decimal("300.0")
+        base_sz = Decimal("1500.0")
+
+        def calc_cap(top3_depth: Decimal):
+            if top3_depth < min_sz:
+                return None
+            return min(base_sz, max(min_sz, top3_depth * ratio))
+
+        # 1. Deep book: BTC/ETH ($50k top 3 depth) -> capped at base_sz ($1,500)
+        self.assertEqual(calc_cap(Decimal("50000.0")), Decimal("1500.0"))
+
+        # 2. Mid book: SAGA ($2,500 top 3 depth) -> 20% = $500
+        self.assertEqual(calc_cap(Decimal("2500.0")), Decimal("500.0"))
+
+        # 3. Shallow book: STRK ($800 top 3 depth) -> 20% = $160, clamped to min_order_sz ($300)
+        self.assertEqual(calc_cap(Decimal("800.0")), Decimal("300.0"))
+
+        # 4. Mirage book: DYM ($180 top 3 depth < $300) -> blocked (None)
+        self.assertIsNone(calc_cap(Decimal("180.0")))
+
+    def test_executable_vwap_net_edge_calculation(self):
+        # Case A: Strong pulse, healthy book
+        raw_vwap_basis = Decimal("0.0075")  # 75 bps
+        taker_fees = Decimal("0.0005") * Decimal("4.0")  # 20 bps
+        latency_slip = Decimal("0.0002") * Decimal("4.0")  # 8 bps
+        c1_slip = Decimal("0.0003")  # 3 bps
+        c2_slip = Decimal("0.0004")  # 4 bps
+        exit_depth_slip = c1_slip + c2_slip  # 7 bps
+        total_friction = taker_fees + latency_slip + exit_depth_slip  # 35 bps
+
+        net_edge = raw_vwap_basis - total_friction  # 40 bps
+        self.assertAlmostEqual(float(net_edge), 0.0040, places=6)
+        self.assertGreaterEqual(net_edge, Decimal("0.0030"))  # Passes 30 bps gate
+        self.assertLessEqual(max(c1_slip, c2_slip), Decimal("0.0025"))  # Passes 25 bps slip cap
+
+        # Case B: Excessive single leg depth slippage (thin book eaten past L3)
+        c2_bad_slip = Decimal("0.0035")  # 35 bps > 25 bps ceiling
+        self.assertGreater(c2_bad_slip, Decimal("0.0025"))  # Blocked by slippage ceiling
+
+        # Case C: Insufficient net edge after friction
+        marginal_vwap_basis = Decimal("0.0055")  # 55 bps
+        marginal_net_edge = marginal_vwap_basis - total_friction  # 55 - 35 = 20 bps
+        self.assertLess(marginal_net_edge, Decimal("0.0030"))  # Blocked by net edge gate
 
 
 class TestBasisRendering(unittest.TestCase):
@@ -372,6 +430,65 @@ view.render_basis_stat_arb_tables(data, "test-bot")
             self.assertIn("🟢 止盈就绪 (已过冷静期 60s)", html_text)
             self.assertIn("2小时", html_text)
             self.assertIn("2周期", html_text)  # Deduplicated from 3 events across 2 timestamps
+
+    def test_radar_tab_rendering_with_dynamic_capacity_and_edge(self):
+        """Verify Radar table renders Top 3 depth, safe capacity, and VWAP net edge."""
+        from streamlit.testing.v1 import AppTest
+        code = '''
+import frontend.components.basis_stat_arb_view as view
+data = {
+    "strategy": "basis_stat_arb",
+    "is_dry_run": True,
+    "active_positions": [],
+    "closed_trades": [],
+    "market_comparison": [
+        {
+            "token": "SAGA",
+            "price_1": 0.0201,
+            "price_2": 0.0200,
+            "basis_spread_pct": 0.0050,
+            "c1_funding_daily": 0.0003,
+            "c2_funding_daily": 0.0001,
+            "carry_if_short_c1": 0.0002,
+            "dislocation_status": "⚡ 偏离超标 +0.50% (Short C1/Long C2)",
+            "c1_top3_depth": 750.0,
+            "c2_top3_depth": 2500.0,
+            "safe_capacity": 300.0,
+            "net_executable_edge_pct": 0.0035,
+        },
+        {
+            "token": "DYM",
+            "price_1": 0.150,
+            "price_2": 0.148,
+            "basis_spread_pct": 0.0135,
+            "c1_funding_daily": 0.0001,
+            "c2_funding_daily": 0.0001,
+            "carry_if_short_c1": 0.0,
+            "dislocation_status": "🛡️ 流动性虚幻/拦截 (Top3: $180)",
+            "c1_top3_depth": 180.0,
+            "c2_top3_depth": 1200.0,
+            "safe_capacity": 180.0,
+            "net_executable_edge_pct": -0.0010,
+        }
+    ],
+}
+view.render_basis_stat_arb_tables(data, "test-bot")
+'''
+        app = AppTest.from_string(code, default_timeout=20).run()
+        self.assertFalse(app.exception, [r.value for r in app.exception])
+        self.assertTrue(len(app.dataframe) >= 1)
+        df_radar = app.dataframe[0].value
+        self.assertIn("HL Top3深度", df_radar.columns)
+        self.assertIn("BN Top3深度", df_radar.columns)
+        self.assertIn("安全定额容量", df_radar.columns)
+        self.assertIn("VWAP 净空间", df_radar.columns)
+        # SAGA row
+        saga_row = df_radar[df_radar["标的"] == "SAGA"].iloc[0]
+        self.assertEqual(saga_row["安全定额容量"], "$300")
+        self.assertEqual(saga_row["VWAP 净空间"], "+0.350%")
+        # DYM row
+        dym_row = df_radar[df_radar["标的"] == "DYM"].iloc[0]
+        self.assertIn("流动性虚幻", dym_row["偏离撮合状态"])
 
 
 if __name__ == "__main__":
