@@ -553,7 +553,7 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
 
     with tab_discovery:
         st.markdown("##### 🔭 全网待命寻优雷达 (Tier 1 REST Background Discovery)")
-        st.caption("后台轻量 REST 巡检 Binance 与 Hyperliquid 全量 185+ 永续合约标的。一旦发现盘口偏离 ≥ 0.70% 且 24h 成交量达标的优质标的，系统将智能淘汰在役池中基差最低的僵尸代币，动态热插拔吸纳新标的。")
+        st.caption("后台轻量 REST 巡检 Binance 与 Hyperliquid 全量 185+ 永续合约标的。一旦发现盘口偏离 ≥ 0.30% 且 24h 成交量达标的优质标的，系统将智能淘汰在役池中基差最低的僵尸代币，动态热插拔吸纳新标的。")
         if not discovery_candidates:
             st.info("ℹ️ 全网寻优引擎正在后台执行轻量 REST 巡检（约 3 分钟一轮），请稍候刷新...")
         else:
@@ -568,10 +568,10 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
                 # Eligibility status
                 if is_act:
                     status_badge = "🛡️ 在役护城河 (ACTIVE)"
-                elif abs(basis) >= 0.0070 and bn_vol >= 2000000.0 and hl_vol >= 500000.0:
+                elif abs(basis) >= 0.0030 and bn_vol >= 2000000.0 and hl_vol >= 500000.0:
                     status_badge = "⚡ 达标待命 (QUALIFIED)"
-                elif abs(basis) >= 0.0070:
-                    status_badge = "⚠️ 费率偏离 (流动性不足)"
+                elif abs(basis) >= 0.0030:
+                    status_badge = "⚠️ 基差偏离 (流动性不足)"
                 else:
                     status_badge = "⏳ 观察中 (STANDBY)"
 
