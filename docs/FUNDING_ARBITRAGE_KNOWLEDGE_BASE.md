@@ -962,6 +962,43 @@ $$Size_{quote} = \min\left(Size_{target}, \sum_{k=1}^{25} (P_k \times Q_k)_{c1} 
 4. **影子微额压测体系**：配置生成器支持低至 $10~$15 微额输入与一键预设，配套生成 `basis_stat_arb_hyperliquid_binance_micro_live.yml`，全量 63 项前端与核心回归测试 100% 通过。
 
 
+## 2026-10-22 10:00：基差统计套利 216 笔历史战绩追溯回测与账本校对回填
+
+详见专项回测报告：[`docs/BASIS_STAT_ARB_BACKTEST_2026-10-22.md`](file:///home/neo/projects/hummingbot/docs/BASIS_STAT_ARB_BACKTEST_2026-10-22.md)。
+对实例累计的 216 笔历史平仓数据按 v2.5.0 最新策略进行全面追溯重测与账本校正：
+1. **Delta-Zero 账本校对**：将历史记录由按金额计算代币数重算为统一币数（$Q_1 \equiv Q_2$），多空 Delta 裸露归零；以四腿真实名义货值精准计提手续费，更新实例持久化账本 `basis_stat_arb_trades.json`（原始数据备份在 `*.backup_20261022_raw`）；
+2. **70 bps 门槛质量分层**：
+   - 跨过 70 bps 新门槛的优质交易共 10 笔（占比 4.63%），贡献 +$69.42 净利，单笔平均 +$6.94（达杂波交易的近 3 倍），胜率 100%；
+   - 处于 32~69 bps 杂波交易 206 笔（95.37%），单笔均利仅 +$2.53，极易被实盘冲击滑点抹杀；
+3. **真实滑点压力测试定位致死点**：
+   - 单腿滑点 $\le 2$ bps 时，策略净利保持 +$331.27（胜率 97.2%）；
+   - 单腿滑点达 4 bps 时，胜率腰斩至 48.15%（净利跌至 +$72.07）；
+   - 单腿滑点达 5 bps 时，策略全面转负亏损 -$57.53；
+   - 测算出旧策略（0.32% 门槛）致死点为 4.5 bps/腿，而新策略（0.70% 门槛）提供高达 12.5 bps/腿的充裕安全垫。
+
+
+## 2026-10-22 11:30：活跃基差持仓时间归零与冷静期锁定失真全链路排查修复 (v2.6.1)
+
+排查并彻底解决用户反馈的活跃基差持仓卡片“持仓时间显示 0 秒、冷却锁定恒定为 0s/60s、结算周期显示 0 周期”等严重失真问题：
+1. **根因定位（数据链路断层与只读不写）**：
+   - **后端策略状态只读不写**：`v2_basis_stat_arb.py` 的 `manage_active_positions` 虽在内存中实时计算了 `duration_s`、最新盘口报价与浮动盈亏，但从未原地写回 `self.active_basis_arbitrages[token]`。导致持久化到 `basis_stat_arb_trades.json` 的 `active_positions` 仅保留了入场时的静态快照，缺少 `duration_seconds`、`current_price_1/2`、`current_basis_pct`、`settlement_count` 等动态指标。
+   - **前端取值脆弱与逻辑死锁**：前端组件 `basis_stat_arb_view.py` 读取 `dur_sec = int(p.get("duration_seconds", 0))`，在键缺失时回退为 0。导致 `if dur_sec < min_hold`（0 < 60）恒为真，页面永远错误显示 `🛡️ 冷却锁定中 (0s / 门槛 60s)` 与 `持仓: 0秒`。
+   - **结算周期与当前基差虚假**：SAGA 仓位已累计 5 笔资金费（4 次 HL，1 次 BN，去重 4 个独立整点窗口，累计入账 +$0.525），但因缺少 `settlement_count` 键前端默认显示 0 周期；当前基差因缺少当前价被误算为 100% 收敛。
+2. **前后端双向动态自愈方案**：
+   - **前端时间戳动态解耦**：改用 `max(0, int(now_ts - open_timestamp))` 实时动态计算持续时间，配合 `format_precise_duration` 渲染出人类友好的精确时间（如 `3小时 36分 33秒`），并显式展示开仓绝对时间点；彻底杜绝轮询延迟造成的“0秒”假象。
+   - **冷静期徽章自适应分流**：真实持仓超过 60 秒时，自适应呈现 `🟢 止盈就绪 (已过冷静期 60s)`；不足 60 秒时呈现动态倒计时 `🛡️ 最短持仓冷静中 (已持仓 Xs / 剩余 Ys 解锁)`。
+   - **盘口报价与浮盈穿透兜底**：前端自动从 `market_comparison` 实时行情字典中挂载最新报价并重算双腿未实现浮盈、净浮盈与双边真实保证金 ROE。
+   - **结算周期动态去重**：自动按 `funding_payments` 时间戳做 `set` 去重统计实际结算窗口（SAGA 精准显示 4 周期）。
+   - **后端策略全状态持久化**：在 `manage_active_positions` 中将 `current_price_1/2`, `current_basis_pct`, `duration_seconds`, `gross_unrealized_trading_pnl`, `net_unrealized_trading_pnl`, `total_pos_net`, `settlement_count` 等原地写回字典，保证磁盘与内存 100% 同步。
+3. **活跃仓位实况核准**：
+   - **SAGA**：开仓于 11:27（已持仓 3小时 36分），累计结算 4 个整点周期（+$0.525），基差已从 +0.40% 压缩至 +0.20%，处于健康的持仓收敛期。
+   - **STRK**：开仓于 14:49（已持仓 14分），基差已从 +0.38% 极限收敛至 +0.018%（收敛进度 81.6%），远超 60 秒冷静期，已处于 `🟢 止盈就绪` 状态。
+4. **自动化测试与质量保障**：
+   - 在 `hummingbot-dashboard/test/test_basis_stat_arb.py` 中新增 `test_active_position_dynamic_duration_and_lock_badge` 测试；
+   - 全量回归测试 100% 通过（前端 17/17 项，API 9/9 项）。
+
+
+
 
 
 

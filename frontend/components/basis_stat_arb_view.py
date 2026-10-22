@@ -1,5 +1,6 @@
 import json
 import os
+import time
 from datetime import datetime, timezone
 import pandas as pd
 import streamlit as st
@@ -121,7 +122,32 @@ def render_basis_stat_arb_kpi_cards(arb_data, total_volume_traded=0.0):
     total_friction = sum(float(t.get("total_friction_cost", float(t.get("trading_fee", 3.0)) + float(t.get("depth_slippage_cost", 0.0)) + float(t.get("latency_slippage_cost", 0.0)))) for t in closed_trades)
     avg_alpha_retention = (total_realized_pnl / total_gross_trading * 100.0) if total_gross_trading > 0 else 0.0
 
-    unrealized_trading_pnl = sum(float(p.get("unrealized_trading_pnl", 0)) for p in active_pos)
+    market_comp = arb_data.get("market_comparison", [])
+    market_comp_map = {m.get("token"): m for m in market_comp if m.get("token")}
+
+    # Dynamically compute unrealized trading PnL with live market quotes
+    active_unrealized_list = []
+    for p in active_pos:
+        tok = p.get("token", "")
+        p1_entry = float(p.get("entry_price_1", 0.0))
+        p2_entry = float(p.get("entry_price_2", 0.0))
+        pos_size = float(p.get("position_size", 0.0))
+        amt1 = float(p.get("amount_1", pos_size / p1_entry if p1_entry > 0 else 0.0))
+        amt2 = float(p.get("amount_2", pos_size / p2_entry if p2_entry > 0 else 0.0))
+        mc_info = market_comp_map.get(tok, {})
+        p1_mc = mc_info.get("price_1")
+        p2_mc = mc_info.get("price_2")
+        p1_curr = float(p.get("current_price_1") or (p1_mc if p1_mc and p1_mc > 0 else p1_entry))
+        p2_curr = float(p.get("current_price_2") or (p2_mc if p2_mc and p2_mc > 0 else p2_entry))
+        side1 = p.get("side_1", "")
+        side2 = p.get("side_2", "")
+        l1 = (p1_curr - p1_entry) * amt1 if side1 == "BUY" else (p1_entry - p1_curr) * amt1
+        l2 = (p2_curr - p2_entry) * amt2 if side2 == "BUY" else (p2_entry - p2_curr) * amt2
+        fee_est = float(p.get("trading_fee", ((amt1 * p1_entry) + (amt2 * p2_entry) + (amt1 * p1_curr) + (amt2 * p2_curr)) * 0.0005))
+        net_unrealized = (l1 + l2) - fee_est
+        active_unrealized_list.append(net_unrealized)
+
+    unrealized_trading_pnl = sum(active_unrealized_list)
     unrealized_settled_funding = sum(float(p.get("settled_funding_pnl", p.get("funding_income", 0))) for p in active_pos)
     unrealized_indicative_carry = sum(float(p.get("indicative_accrued_carry", 0)) for p in active_pos)
     total_unrealized_pnl = unrealized_trading_pnl + unrealized_settled_funding
@@ -240,16 +266,25 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
 
     with tab_active:
         if not active_pos:
-            st.info("ℹ️ 当前暂无活跃的基差偏离套利持仓。策略正以 1 秒高频持续巡检主流币跨所价差，一旦盘口基差偏离 ≥ 0.32%，将自动以两所等额多空对冲介入！")
+            st.info("ℹ️ 当前暂无活跃的基差偏离套利持仓。策略正以 1 秒高频持续巡检主流币跨所价差，一旦盘口基差偏离 ≥ 0.70%，将自动以两所等额多空对冲介入！")
         else:
+            market_comp_map = {m.get("token"): m for m in market_comp if m.get("token")}
+            now_ts = time.time()
             for p in active_pos:
                 min_hold = int(p.get("min_holding_seconds", arb_data.get("min_holding_seconds", 60)))
                 tok = p.get("token", "")
-                dur_sec = int(p.get("duration_seconds", 0))
+
+                # Accurate dynamic duration calculation from open timestamp
+                open_ts = float(p.get("open_timestamp", 0.0))
+                if open_ts > 0 and now_ts >= open_ts:
+                    dur_sec = max(0, int(now_ts - open_ts))
+                else:
+                    dur_sec = max(0, int(p.get("duration_seconds", 0)))
                 dur_str = format_precise_duration(dur_sec)
+                open_time_str = format_timestamp(open_ts, active_tz) if open_ts > 0 else "未知"
+
                 entry_basis = float(p.get("entry_basis_pct", 0.0))
-                curr_basis = float(p.get("current_basis_pct", 0.0))
-                target_comp = float(p.get("target_compression_pct", 0.0015))
+                target_comp = float(p.get("target_compression_pct", 0.0005))
                 pos_size = float(p.get("position_size", 0.0))
                 dual_notional = float(p.get("total_notional", pos_size * 2.0))
                 pos_lev = float(p.get("leverage") or leverage)
@@ -261,32 +296,58 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
 
                 p1_entry = float(p.get("entry_price_1", 0.0))
                 p2_entry = float(p.get("entry_price_2", 0.0))
-                p1_curr = float(p.get("current_price_1", p1_entry))
-                p2_curr = float(p.get("current_price_2", p2_entry))
                 amt1 = float(p.get("amount_1", pos_size / p1_entry if p1_entry > 0 else 0.0))
                 amt2 = float(p.get("amount_2", pos_size / p2_entry if p2_entry > 0 else 0.0))
-                
-                # Full fee and PnL breakdown
-                unrealized = float(p.get("unrealized_trading_pnl", 0.0))
-                fee_est = float(p.get("trading_fee", 3.0))
-                gross_unrealized = float(p.get("gross_unrealized_trading_pnl", unrealized + fee_est))
-                net_unrealized = float(p.get("net_unrealized_trading_pnl", unrealized))
-                carry = float(p.get("settled_funding_pnl", p.get("funding_income", 0.0)))
-                indicative_carry = float(p.get("indicative_accrued_carry", 0.0))
-                total_pos_net = net_unrealized + carry
-                roe_unrealized = float(p.get("unrealized_roe_pct", total_pos_net / tot_margin if tot_margin > 0 else 0.0))
-                
-                settle_cnt = int(p.get("settlement_count", 0))
+
+                # Real-time prices & basis from market_comp or pos
+                mc_info = market_comp_map.get(tok, {})
+                p1_mc = mc_info.get("price_1")
+                p2_mc = mc_info.get("price_2")
+                p1_curr = float(p.get("current_price_1") or (p1_mc if p1_mc and p1_mc > 0 else p1_entry))
+                p2_curr = float(p.get("current_price_2") or (p2_mc if p2_mc and p2_mc > 0 else p2_entry))
+
+                if "current_basis_pct" in p and abs(float(p["current_basis_pct"])) > 0:
+                    curr_basis = float(p["current_basis_pct"])
+                elif mc_info.get("basis_spread_pct") is not None:
+                    curr_basis = float(mc_info["basis_spread_pct"])
+                else:
+                    curr_basis = float(p.get("entry_basis_pct", 0.0))
+
                 side1 = p.get("side_1", "")
                 side2 = p.get("side_2", "")
                 c1 = p.get("connector_1", "")
                 c2 = p.get("connector_2", "")
 
-                # Anti-churn lock badge
-                if dur_sec < min_hold:
-                    lock_badge = f'<span style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); padding: 2px 7px; border-radius: 4px; font-size: 0.72rem; margin-left: 8px;">🛡️ 冷却锁定中 ({dur_sec}s / 门槛 {min_hold}s)</span>'
+                # Floating PnL breakdown
+                if side1 == "BUY":
+                    l1 = (p1_curr - p1_entry) * amt1
                 else:
-                    lock_badge = '<span style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); padding: 2px 7px; border-radius: 4px; font-size: 0.72rem; margin-left: 8px;">🟢 止盈就绪</span>'
+                    l1 = (p1_entry - p1_curr) * amt1
+
+                if side2 == "BUY":
+                    l2 = (p2_curr - p2_entry) * amt2
+                else:
+                    l2 = (p2_entry - p2_curr) * amt2
+
+                gross_unrealized = l1 + l2
+                fee_est = float(p.get("trading_fee", ((amt1 * p1_entry) + (amt2 * p2_entry) + (amt1 * p1_curr) + (amt2 * p2_curr)) * 0.0005))
+                net_unrealized = gross_unrealized - fee_est
+                carry = float(p.get("settled_funding_pnl", p.get("funding_income", 0.0)))
+                total_pos_net = net_unrealized + carry
+                roe_unrealized = total_pos_net / tot_margin if tot_margin > 0 else 0.0
+
+                daily_carry = float(p.get("expected_daily_carry", 0.0))
+                indicative_carry = float(pos_size * daily_carry * (dur_sec / 86400.0))
+
+                f_payments = p.get("funding_payments", [])
+                settle_cnt = int(p.get("settlement_count") or len(set(fp.get("timestamp") for fp in f_payments if fp.get("timestamp"))))
+
+                # Anti-churn lock badge: clear countdown & status
+                if dur_sec < min_hold:
+                    rem_sec = min_hold - dur_sec
+                    lock_badge = f'<span style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); padding: 2px 7px; border-radius: 4px; font-size: 0.72rem; margin-left: 8px;">🛡️ 最短持仓冷静中 (已持仓 {dur_sec}s / 剩余 {rem_sec}s 解锁)</span>'
+                else:
+                    lock_badge = f'<span style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); padding: 2px 7px; border-radius: 4px; font-size: 0.72rem; margin-left: 8px;">🟢 止盈就绪 (已过冷静期 {min_hold}s)</span>'
 
                 # Compression progress calculation
                 initial_abs_gap = abs(entry_basis)
@@ -303,7 +364,8 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
 {side1} {c1} + {side2} {c2}
 </span>
 {lock_badge}
-<span style="color: #94a3b8; font-size: 0.8rem; margin-left: 6px;">持仓: {dur_str}</span>
+<span style="color: #94a3b8; font-size: 0.8rem; margin-left: 6px;">⏱️ 持仓: <b>{dur_str}</b></span>
+<span style="color: #64748b; font-size: 0.75rem; margin-left: 4px;">(开仓于 {open_time_str})</span>
 </div>
 <div style="text-align: right;">
 <span style="font-size: 1.15rem; font-weight: 700; color: {pnl_color};">${total_pos_net:+,.2f}</span>
@@ -321,8 +383,8 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
 <span style="background: rgba(16, 185, 129, 0.2); color: #34d399; font-size: 0.72rem; padding: 1px 6px; border-radius: 4px; font-weight: 600;">🪙 严格等币数 (Delta-Zero)</span>
 </div>
 <div style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 0.78rem; color: #cbd5e1; margin-top: 6px; border-top: 1px dashed rgba(255, 255, 255, 0.1); padding-top: 6px;">
-<span>🔹 腿1 ({c1}): <b>{side1} {amt1:,.4f} {tok}</b> @ 开仓 ${p1_entry:.4f} (当前 ${p1_curr:.4f} | 货值 ${amt1 * p1_entry:,.2f} | 押金 ${margin1:,.2f})</span>
-<span>🔸 腿2 ({c2}): <b>{side2} {amt2:,.4f} {tok}</b> @ 开仓 ${p2_entry:.4f} (当前 ${p2_curr:.4f} | 货值 ${amt2 * p2_entry:,.2f} | 押金 ${margin2:,.2f})</span>
+<span>🔹 腿1 ({c1}): <b>{side1} {amt1:,.4f} {tok}</b> @ 开仓 ${p1_entry:.4f} (当前 ${p1_curr:.4f} | 当前货值 ${amt1 * p1_curr:,.2f} | 押金 ${margin1:,.2f})</span>
+<span>🔸 腿2 ({c2}): <b>{side2} {amt2:,.4f} {tok}</b> @ 开仓 ${p2_entry:.4f} (当前 ${p2_curr:.4f} | 当前货值 ${amt2 * p2_curr:,.2f} | 押金 ${margin2:,.2f})</span>
 </div>
 </div>
 <div style="display: flex; justify-content: space-between; margin-top: 10px; font-size: 0.82rem; color: #cbd5e1; flex-wrap: wrap; gap: 6px;">

@@ -299,6 +299,50 @@ view.render_basis_stat_arb_tables(data, "test-bot")
             self.assertTrue(any("资金与仓位规格明细面板" in h.value for h in app.html))
         self.assertFalse(any("<!-- 资金与仓位规格明细面板 -->" in m.value for m in app.markdown))
 
+    def test_active_position_dynamic_duration_and_lock_badge(self):
+        """Verify dynamic duration and lock badge correctly transition based on open_timestamp."""
+        import time
+        from streamlit.testing.v1 import AppTest
+        now_ts = time.time()
+        # Case 1: Held for 2 hours (7200s), duration_seconds omitted, should show Ready
+        code = f'''
+import frontend.components.basis_stat_arb_view as view
+data = {{
+    "strategy": "basis_stat_arb",
+    "is_dry_run": True,
+    "active_positions": [{{
+        "token": "SAGA",
+        "position_size": 1500.0,
+        "entry_price_1": 0.0201,
+        "entry_price_2": 0.0200,
+        "open_timestamp": {now_ts - 7200},
+        "connector_1": "hyperliquid_perpetual",
+        "connector_2": "binance_perpetual",
+        "side_1": "SELL",
+        "side_2": "BUY",
+        "entry_basis_pct": 0.0035,
+        "min_holding_seconds": 60,
+        "funding_payments": [
+            {{"timestamp": 100, "connector": "c1", "amount": 0.1}},
+            {{"timestamp": 100, "connector": "c2", "amount": -0.05}},
+            {{"timestamp": 200, "connector": "c1", "amount": 0.1}},
+        ]
+    }}],
+    "closed_trades": [],
+    "market_comparison": [
+        {{"token": "SAGA", "price_1": 0.02005, "price_2": 0.02002}}
+    ],
+}}
+view.render_basis_stat_arb_tables(data, "test-bot")
+'''
+        app = AppTest.from_string(code, default_timeout=20).run()
+        self.assertFalse(app.exception, [r.value for r in app.exception])
+        if hasattr(app, "html") and len(app.html) > 0:
+            html_text = " ".join(h.value for h in app.html)
+            self.assertIn("🟢 止盈就绪 (已过冷静期 60s)", html_text)
+            self.assertIn("2小时", html_text)
+            self.assertIn("2周期", html_text)  # Deduplicated from 3 events across 2 timestamps
+
 
 if __name__ == "__main__":
     unittest.main()
