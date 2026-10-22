@@ -25,6 +25,37 @@ def format_precise_duration(seconds) -> str:
     return f"{h}小时 {m}分 {s}秒"
 
 
+def resolve_trade_friction(t):
+    """
+    Resolve trade friction metrics with strict orderbook and latency models fallback.
+    Guarantees that slippage and friction metrics are never 0 or unpopulated even on legacy records.
+    """
+    pos_size = float(t.get("position_size", 1500.0))
+    fee = float(t.get("trading_fee", 3.0))
+
+    # Depth slippage: use stored value if present (> 0), otherwise 1.5 bps / leg (4 legs = 6.0 bps = $0.90)
+    raw_depth = t.get("depth_slippage_cost")
+    if raw_depth is not None and float(raw_depth) > 0:
+        depth_slip = float(raw_depth)
+    else:
+        depth_slip = pos_size * 0.00015 * 4.0
+
+    # Latency slippage: use stored value if present (> 0), otherwise 2.0 bps / leg (4 legs = 8.0 bps = $1.20)
+    raw_latency = t.get("latency_slippage_cost")
+    if raw_latency is not None and float(raw_latency) > 0:
+        latency_slip = float(raw_latency)
+    else:
+        latency_slip = pos_size * 0.00020 * 4.0
+
+    raw_tot = t.get("total_friction_cost")
+    if raw_tot is not None and float(raw_tot) > 0:
+        tot_friction = float(raw_tot)
+    else:
+        tot_friction = fee + depth_slip + latency_slip
+
+    return fee, depth_slip, latency_slip, tot_friction
+
+
 def get_bot_basis_stat_arb_data(bot_name, performance):
     """Retrieve basis stat arb custom_info from MQTT performance or local disk."""
     # Strict Isolation Guard: funding rate bots can NEVER be matched as basis bots
@@ -115,11 +146,13 @@ def render_basis_stat_arb_kpi_cards(arb_data, total_volume_traded=0.0):
     realized_trading_pnl = sum(float(t.get("trading_pnl", 0)) for t in closed_trades)
     realized_funding_pnl = sum(float(t.get("funding_pnl", 0)) for t in closed_trades)
     total_realized_pnl = sum(float(t.get("total_net_pnl", 0)) for t in closed_trades)
-    total_trading_fees = sum(float(t.get("trading_fee", 3.0)) for t in closed_trades)
-    total_gross_trading = sum(float(t.get("gross_trading_pnl", float(t.get("trading_pnl", 0)) + float(t.get("trading_fee", 3.0)))) for t in closed_trades)
-    total_depth_slip = sum(float(t.get("depth_slippage_cost", 0.0)) for t in closed_trades)
-    total_latency_slip = sum(float(t.get("latency_slippage_cost", 0.0)) for t in closed_trades)
-    total_friction = sum(float(t.get("total_friction_cost", float(t.get("trading_fee", 3.0)) + float(t.get("depth_slippage_cost", 0.0)) + float(t.get("latency_slippage_cost", 0.0)))) for t in closed_trades)
+    
+    trade_frictions = [resolve_trade_friction(t) for t in closed_trades]
+    total_trading_fees = sum(f[0] for f in trade_frictions)
+    total_depth_slip = sum(f[1] for f in trade_frictions)
+    total_latency_slip = sum(f[2] for f in trade_frictions)
+    total_friction = sum(f[3] for f in trade_frictions)
+    total_gross_trading = sum(float(t.get("gross_trading_pnl", float(t.get("trading_pnl", 0)) + f[3])) for t, f in zip(closed_trades, trade_frictions))
     avg_alpha_retention = (total_realized_pnl / total_gross_trading * 100.0) if total_gross_trading > 0 else 0.0
 
     market_comp = arb_data.get("market_comparison", [])
@@ -417,8 +450,8 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
             for t in reversed(closed_trades):
                 dur_sec = int(t.get("duration_seconds", 0))
                 dur_str = format_precise_duration(dur_sec)
-                gross_tpnl = float(t.get("gross_trading_pnl", float(t.get("trading_pnl", 0)) + float(t.get("trading_fee", 3.0))))
-                fee = float(t.get("trading_fee", 3.0))
+                fee, depth_slip_val, latency_slip_val, friction_tot = resolve_trade_friction(t)
+                gross_tpnl = float(t.get("gross_trading_pnl", float(t.get("trading_pnl", 0)) + friction_tot))
                 net_tpnl = float(t.get("trading_pnl", 0))
                 fpnl = float(t.get("funding_pnl", 0))
                 tot_pnl = float(t.get("total_net_pnl", 0))
@@ -435,9 +468,6 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
                 amt_1 = float(t.get("amount_1", pos_size_val / p1_ent if p1_ent > 0 else 0.0))
                 amt_2 = float(t.get("amount_2", pos_size_val / p2_ent if p2_ent > 0 else 0.0))
 
-                depth_slip_val = float(t.get("depth_slippage_cost", 0.0))
-                latency_slip_val = float(t.get("latency_slippage_cost", 0.0))
-                friction_tot = float(t.get("total_friction_cost", fee + depth_slip_val + latency_slip_val))
                 retention_pct = float(t.get("alpha_retention_pct", (tot_pnl / gross_tpnl * 100.0) if gross_tpnl > 0 else 0.0))
 
                 closed_rows.append({

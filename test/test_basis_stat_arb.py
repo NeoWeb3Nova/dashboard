@@ -20,6 +20,7 @@ from frontend.components.basis_stat_arb_view import (
     format_precise_duration,
     get_bot_basis_stat_arb_data,
     render_basis_stat_arb_kpi_cards,
+    resolve_trade_friction,
 )
 
 
@@ -212,6 +213,35 @@ class TestBasisFinancialAccounting(unittest.TestCase):
         # Alpha retention: Net / Gross = 9.50 / 15.00 = 63.33%
         alpha_retention = (total_net_pnl / gross_trading_pnl) * 100.0
         self.assertAlmostEqual(alpha_retention, 63.3333, places=3)
+
+    def test_resolve_trade_friction_fallback(self):
+        # Legacy trade missing depth_slippage_cost and latency_slippage_cost
+        legacy_trade = {
+            "token": "BTC",
+            "position_size": 1500.0,
+            "trading_fee": 3.0,
+            "trading_pnl": 2.5,
+        }
+        fee, depth_slip, latency_slip, tot_friction = resolve_trade_friction(legacy_trade)
+        self.assertEqual(fee, 3.0)
+        self.assertAlmostEqual(depth_slip, 0.90, places=2)  # 1500 * 0.00015 * 4 = 0.90
+        self.assertAlmostEqual(latency_slip, 1.20, places=2)  # 1500 * 0.00020 * 4 = 1.20
+        self.assertAlmostEqual(tot_friction, 5.10, places=2)  # 3.0 + 0.90 + 1.20 = 5.10
+
+        # Modern trade with explicit orderbook VWAP slippage
+        modern_trade = {
+            "token": "ETH",
+            "position_size": 1500.0,
+            "trading_fee": 3.0,
+            "depth_slippage_cost": 2.15,
+            "latency_slippage_cost": 1.20,
+            "total_friction_cost": 6.35,
+        }
+        fee_m, depth_m, latency_m, tot_m = resolve_trade_friction(modern_trade)
+        self.assertEqual(fee_m, 3.0)
+        self.assertEqual(depth_m, 2.15)
+        self.assertEqual(latency_m, 1.20)
+        self.assertEqual(tot_m, 6.35)
 
 
 class TestBasisConfigContract(unittest.TestCase):
