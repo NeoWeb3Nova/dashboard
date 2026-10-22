@@ -153,7 +153,14 @@ def render_basis_stat_arb_kpi_cards(arb_data, total_volume_traded=0.0):
     total_latency_slip = sum(f[2] for f in trade_frictions)
     total_friction = sum(f[3] for f in trade_frictions)
     total_gross_trading = sum(float(t.get("gross_trading_pnl", float(t.get("trading_pnl", 0)) + f[3])) for t, f in zip(closed_trades, trade_frictions))
-    avg_alpha_retention = (total_realized_pnl / total_gross_trading * 100.0) if total_gross_trading > 0 else 0.0
+    
+    # Real Penetrated Net PnL (subtracts all frictions: fees + depth slippage + latency slippage)
+    real_penetrated_pnl = total_gross_trading - total_friction + realized_funding_pnl
+    # Paper Net PnL (only subtracts trading fees, ignores slippage)
+    paper_net_pnl = total_gross_trading - total_trading_fees + realized_funding_pnl
+    total_realized_pnl = real_penetrated_pnl
+
+    avg_alpha_retention = (real_penetrated_pnl / total_gross_trading * 100.0) if total_gross_trading > 0 else 0.0
 
     market_comp = arb_data.get("market_comparison", [])
     market_comp_map = {m.get("token"): m for m in market_comp if m.get("token")}
@@ -188,9 +195,12 @@ def render_basis_stat_arb_kpi_cards(arb_data, total_volume_traded=0.0):
     net_combined_pnl = total_realized_pnl + total_unrealized_pnl
     total_funding_harvested = realized_funding_pnl + unrealized_settled_funding
 
-    # Win rate & stats
-    winning_trades = [t for t in closed_trades if float(t.get("total_net_pnl", 0)) > 0]
-    win_rate = (len(winning_trades) / len(closed_trades) * 100.0) if closed_trades else 0.0
+    # Real vs Paper Win rate & stats
+    real_winning_trades = [t for t, f in zip(closed_trades, trade_frictions) if (float(t.get("gross_trading_pnl", float(t.get("trading_pnl", 0)) + f[3])) - f[3] + float(t.get("funding_pnl", 0))) > 0.0001]
+    real_win_rate = (len(real_winning_trades) / len(closed_trades) * 100.0) if closed_trades else 0.0
+    paper_winning_trades = [t for t in closed_trades if float(t.get("paper_net_pnl", t.get("total_net_pnl", 0))) > 0]
+    paper_win_rate = (len(paper_winning_trades) / len(closed_trades) * 100.0) if closed_trades else 0.0
+
     avg_hold_seconds = (sum(int(t.get("duration_seconds", 0)) for t in closed_trades) / len(closed_trades)) if closed_trades else 0.0
     avg_hold_str = format_precise_duration(avg_hold_seconds)
 
@@ -204,11 +214,11 @@ def render_basis_stat_arb_kpi_cards(arb_data, total_volume_traded=0.0):
         )
     with c2:
         st.metric(
-            "🏦 已平仓战报结清净利",
-            f"${total_realized_pnl:+,.2f}",
-            f"胜率 {win_rate:.1f}% ({len(winning_trades)}/{len(closed_trades)} 胜)",
+            "🏦 真实穿透结清净利",
+            f"${real_penetrated_pnl:+,.2f}",
+            f"真实胜率 {real_win_rate:.1f}% ({len(real_winning_trades)}/{len(closed_trades)} 胜) | 纸面 ${paper_net_pnl:+,.1f}",
             delta_color="normal",
-            help=f"所有已均值回归平仓的结清真金白银净收益。已扣除全部4腿真实Taker手续费（${total_trading_fees:,.2f}）。胜率 {win_rate:.1f}% ({len(winning_trades)}/{len(closed_trades)} 胜)"
+            help=f"全摩擦穿透落袋真金净利：理论毛利(${total_gross_trading:,.2f}) - 全摩擦总成本(${total_friction:,.2f}) + 已结资金费(${realized_funding_pnl:,.2f}) = ${real_penetrated_pnl:+,.2f}。\n包含L2深度冲击滑点(-${total_depth_slip:,.2f})、网络时延跳价(-${total_latency_slip:,.2f})与交易所手续费(-${total_trading_fees:,.2f})。\n扣除滑点后真实胜率为 {real_win_rate:.1f}%（未扣滑点的纯纸面胜率为 {paper_win_rate:.1f}%，纸面净利 ${paper_net_pnl:+,.2f}）。"
         )
     with c3:
         st.metric(
@@ -452,10 +462,9 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
                 dur_str = format_precise_duration(dur_sec)
                 fee, depth_slip_val, latency_slip_val, friction_tot = resolve_trade_friction(t)
                 gross_tpnl = float(t.get("gross_trading_pnl", float(t.get("trading_pnl", 0)) + friction_tot))
-                net_tpnl = float(t.get("trading_pnl", 0))
                 fpnl = float(t.get("funding_pnl", 0))
-                tot_pnl = float(t.get("total_net_pnl", 0))
-                roe_pct = float(t.get("net_roe_pct", t.get("net_pnl_pct", 0)))
+                real_net_trade = gross_tpnl - friction_tot + fpnl
+                paper_net = gross_tpnl - fee + fpnl
                 
                 pos_size_val = float(t.get("position_size", 1500.0))
                 dual_notional_val = float(t.get("total_notional", pos_size_val * 2.0))
@@ -468,7 +477,8 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
                 amt_1 = float(t.get("amount_1", pos_size_val / p1_ent if p1_ent > 0 else 0.0))
                 amt_2 = float(t.get("amount_2", pos_size_val / p2_ent if p2_ent > 0 else 0.0))
 
-                retention_pct = float(t.get("alpha_retention_pct", (tot_pnl / gross_tpnl * 100.0) if gross_tpnl > 0 else 0.0))
+                roe_pct = real_net_trade / margin_val if margin_val > 0 else 0.0
+                retention_pct = (real_net_trade / gross_tpnl * 100.0) if gross_tpnl > 0 else 0.0
 
                 closed_rows.append({
                     "平仓时间": format_timestamp(t.get("close_timestamp", 0), active_tz),
@@ -486,10 +496,10 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
                     "时延跳价损耗": f"-${latency_slip_val:,.2f}",
                     "预估总手续费": f"-${fee:,.2f}",
                     "摩擦总成本": f"-${friction_tot:,.2f}",
-                    "价差净利润": f"${net_tpnl:+,.2f}",
                     "已结资金费": f"${fpnl:+,.2f}",
                     "跨越结算窗口": f"{t.get('settlement_count', 0)} 周期",
-                    "结清真实净利": f"${tot_pnl:+,.2f}",
+                    "穿透真实净利": f"${real_net_trade:+,.2f}",
+                    "纸面净利 (仅扣佣金)": f"${paper_net:+,.2f}",
                     "真实本金 ROE": f"{roe_pct:+.2%}",
                     "Alpha 留存率": f"{retention_pct:.1f}%",
                     "平仓原因": t.get("close_reason", ""),
