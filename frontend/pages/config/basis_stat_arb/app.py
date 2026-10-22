@@ -193,17 +193,19 @@ with form_col1:
     dual_margin = (dual_quote / lev_int) if lev_int > 0 else dual_quote
     four_leg_fee = single_quote * 0.0005 * 4.0
 
-    st.markdown(f"""
-    <div style="background: rgba(30, 41, 59, 0.45); border-radius: 8px; padding: 10px 14px; margin: 8px 0; border: 1px solid rgba(59, 130, 246, 0.25);">
-        <div style="font-size: 0.78rem; font-weight: 700; color: #94a3b8; margin-bottom: 4px;">📊 单标的资金占用与对冲规格明细</div>
-        <div style="display: flex; justify-content: space-between; font-size: 0.8rem; color: #cbd5e1; flex-wrap: wrap; gap: 6px;">
-            <span>💰 单边名义货值: <b style="color: #38bdf8;">${single_quote:,.2f}</b></span>
-            <span>🌐 双边总敞口: <b style="color: #a78bfa;">${dual_quote:,.2f}</b></span>
-            <span>🛡️ 实缴总保证金: <b style="color: #fbbf24;">${dual_margin:,.2f}</b></span>
-            <span>💳 4腿预估摩擦: <b style="color: #f87171;">-${four_leg_fee:,.2f}</b></span>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+    details_html = f"""<div style="background: rgba(30, 41, 59, 0.45); border-radius: 8px; padding: 10px 14px; margin: 8px 0; border: 1px solid rgba(59, 130, 246, 0.25);">
+<div style="font-size: 0.78rem; font-weight: 700; color: #94a3b8; margin-bottom: 4px;">📊 单标的资金占用与对冲规格明细</div>
+<div style="display: flex; justify-content: space-between; font-size: 0.8rem; color: #cbd5e1; flex-wrap: wrap; gap: 6px;">
+<span>💰 单边名义货值: <b style="color: #38bdf8;">${single_quote:,.2f}</b></span>
+<span>🌐 双边总敞口: <b style="color: #a78bfa;">${dual_quote:,.2f}</b></span>
+<span>🛡️ 实缴总保证金: <b style="color: #fbbf24;">${dual_margin:,.2f}</b></span>
+<span>💳 4腿预估摩擦: <b style="color: #f87171;">-${four_leg_fee:,.2f}</b></span>
+</div>
+</div>"""
+    if hasattr(st, "html"):
+        st.html(details_html)
+    else:
+        st.markdown(details_html, unsafe_allow_html=True)
 
 with form_col2:
     st.markdown("##### 2. 基差触发与止盈风控参数")

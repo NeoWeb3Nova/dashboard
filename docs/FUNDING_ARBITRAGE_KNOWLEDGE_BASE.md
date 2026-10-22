@@ -68,4 +68,13 @@
 3. **AppTest 端到端渲染测试注入**：在 `test_basis_stat_arb.py` 增设 `TestBasisRendering`，使用 `streamlit.testing.v1.AppTest` 完整模拟包含真实活跃持仓与历史平仓的 UI 渲染生命周期，全量 61 项测试 100% 通过。
 
 
+## 2026-10-22 08:00：基差活跃持仓 CommonMark 代码泄露修复与 `st.html` 纯净渲染隔离 (v2.4.4)
+
+排查并彻底解决用户反馈的活跃基差持仓卡片“代码直接暴露在黑色代码框内”的渲染 Bug：
+1. **定位 CommonMark 空行+4空格缩进代码块死穴**：`st.markdown` 内包含空行后跟随 20 空格缩进的 HTML 注释与标签，触发 CommonMark 缩进代码块规则，导致前端把原生 HTML 标签作为 `<pre><code>` 渲染并显示复制按钮；
+2. **迁移至 `st.html` 与模板顶格化**：全面改用 Streamlit 原生 `st.html`（附带安全回退），模板顶格并消除多余空行；
+3. **AppTest 守护断言**：在 `test_basis_stat_arb.py` 中增加断言拦截代码泄露，全量 61 项回归 100% 通过。
+
+
+
 

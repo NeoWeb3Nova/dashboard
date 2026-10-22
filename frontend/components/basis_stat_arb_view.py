@@ -200,25 +200,24 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
     render_basis_stat_arb_kpi_cards(arb_data)
 
     # Dock Navigation Tabs
-    st.markdown("""
-    <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08);
-                border-radius: 12px; padding: 10px 16px; margin: 16px 0 12px 0;
-                display: flex; align-items: center; justify-content: space-between;">
-        <div style="display: flex; align-items: center; gap: 10px;">
-            <span style="font-size: 1.15rem;">⚡</span>
-            <span style="font-weight: 700; color: #f8fafc; font-size: 0.95rem; letter-spacing: 0.3px;">
-                基差统计套利全景透视 (Basis Mean-Reversion + Carry Double-Dip)
-            </span>
-            <span style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3);
-                         padding: 2px 8px; border-radius: 6px; font-size: 0.72rem; font-weight: 600;">
-                均值回归脉冲引擎
-            </span>
-        </div>
-        <span style="color: #64748b; font-size: 0.75rem;">
-            💡 捕捉 0.7%~1.2% 脉冲，0.15% 压缩极速收割
-        </span>
-    </div>
-    """, unsafe_allow_html=True)
+    dock_banner_html = """<div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px; padding: 10px 16px; margin: 16px 0 12px 0; display: flex; align-items: center; justify-content: space-between;">
+<div style="display: flex; align-items: center; gap: 10px;">
+<span style="font-size: 1.15rem;">⚡</span>
+<span style="font-weight: 700; color: #f8fafc; font-size: 0.95rem; letter-spacing: 0.3px;">
+基差统计套利全景透视 (Basis Mean-Reversion + Carry Double-Dip)
+</span>
+<span style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); padding: 2px 8px; border-radius: 6px; font-size: 0.72rem; font-weight: 600;">
+均值回归脉冲引擎
+</span>
+</div>
+<span style="color: #64748b; font-size: 0.75rem;">
+💡 捕捉 0.7%~1.2% 脉冲，0.15% 压缩极速收割
+</span>
+</div>"""
+    if hasattr(st, "html"):
+        st.html(dock_banner_html)
+    else:
+        st.markdown(dock_banner_html, unsafe_allow_html=True)
 
     tab_active, tab_closed, tab_radar = st.tabs([
         f"⚡ 活跃基差持仓  [{len(active_pos)} 仓位]",
@@ -283,57 +282,56 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
 
                 pnl_color = "#10b981" if total_pos_net >= 0 else "#ef4444"
 
-                st.markdown(f"""
-                <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(59, 130, 246, 0.25);
-                            border-radius: 10px; padding: 14px; margin-bottom: 12px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
-                            <span style="font-size: 1.15rem; font-weight: 700; color: #f8fafc;">🪙 {tok}</span>
-                            <span style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; margin-left: 4px;">
-                                {side1} {c1} + {side2} {c2}
-                            </span>
-                            {lock_badge}
-                            <span style="color: #94a3b8; font-size: 0.8rem; margin-left: 6px;">持仓: {dur_str}</span>
-                        </div>
-                        <div style="text-align: right;">
-                            <span style="font-size: 1.15rem; font-weight: 700; color: {pnl_color};">${total_pos_net:+,.2f}</span>
-                            <span style="font-size: 0.82rem; font-weight: 600; color: {pnl_color}; margin-left: 6px;">(ROE {roe_unrealized:+.2%})</span>
-                            <div style="font-size: 0.75rem; color: #94a3b8;">毛价差 ${gross_unrealized:+,.2f} | 扣4腿手续费 -${fee_est:,.2f}</div>
-                        </div>
-                    </div>
-
-                    <!-- 资金与仓位规格明细面板 -->
-                    <div style="background: rgba(30, 41, 59, 0.45); border-radius: 8px; padding: 10px 14px; margin-top: 10px; border: 1px solid rgba(255, 255, 255, 0.05);">
-                        <div style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 0.84rem; color: #f1f5f9;">
-                            <span>💰 单边名义货值: <b style="color:#38bdf8;">${pos_size:,.2f}</b></span>
-                            <span>🌐 双边总敞口: <b style="color:#a78bfa;">${dual_notional:,.2f}</b> <small style="color:#94a3b8;">(2 × 单边)</small></span>
-                            <span>🛡️ 实缴总保证金: <b style="color:#fbbf24;">${tot_margin:,.2f}</b> <small style="color:#94a3b8;">({pos_lev:.0f}x 杠杆)</small></span>
-                            <span>💳 预估4腿手续费: <b style="color:#f87171;">-${fee_est:,.2f}</b></span>
-                        </div>
-                        <div style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 0.78rem; color: #cbd5e1; margin-top: 6px; border-top: 1px dashed rgba(255, 255, 255, 0.1); padding-top: 6px;">
-                            <span>🔹 腿1 ({c1}): <b>{side1} {amt1:,.4f} {tok}</b> @ 开仓 ${p1_entry:.4f} (当前 ${p1_curr:.4f} | 货值 ${pos_size:,.2f} | 押金 ${margin1:,.2f})</span>
-                            <span>🔸 腿2 ({c2}): <b>{side2} {amt2:,.4f} {tok}</b> @ 开仓 ${p2_entry:.4f} (当前 ${p2_curr:.4f} | 货值 ${pos_size:,.2f} | 押金 ${margin2:,.2f})</span>
-                        </div>
-                    </div>
-
-                    <div style="display: flex; justify-content: space-between; margin-top: 10px; font-size: 0.82rem; color: #cbd5e1; flex-wrap: wrap; gap: 6px;">
-                        <span>开仓基差: <b>{entry_basis:+.2%}</b></span>
-                        <span>当前实时基差: <b>{curr_basis:+.2%}</b></span>
-                        <span>目标止盈线: <b>≤ ±{target_comp:.2%}</b></span>
-                        <span>已结资金费: <b style="color: #10b981;">+${carry:.2f}</b> <small style="color:#94a3b8;">({settle_cnt}周期)</small></span>
-                        <span>待结预估: <small style="color:#94a3b8;">+${indicative_carry:.2f}</small></span>
-                    </div>
-                    <div style="margin-top: 8px;">
-                        <div style="display: flex; justify-content: space-between; font-size: 0.72rem; color: #94a3b8; margin-bottom: 2px;">
-                            <span>均值回归收敛进度</span>
-                            <span>{progress_pct:.1f}%</span>
-                        </div>
-                        <div style="background: #1e293b; height: 6px; border-radius: 3px; overflow: hidden;">
-                            <div style="background: linear-gradient(90deg, #3b82f6, #10b981); width: {progress_pct}%; height: 100%;"></div>
-                        </div>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
+                pos_card_html = f"""<div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: 10px; padding: 14px; margin-bottom: 12px;">
+<div style="display: flex; justify-content: space-between; align-items: center;">
+<div style="display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
+<span style="font-size: 1.15rem; font-weight: 700; color: #f8fafc;">🪙 {tok}</span>
+<span style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; margin-left: 4px;">
+{side1} {c1} + {side2} {c2}
+</span>
+{lock_badge}
+<span style="color: #94a3b8; font-size: 0.8rem; margin-left: 6px;">持仓: {dur_str}</span>
+</div>
+<div style="text-align: right;">
+<span style="font-size: 1.15rem; font-weight: 700; color: {pnl_color};">${total_pos_net:+,.2f}</span>
+<span style="font-size: 0.82rem; font-weight: 600; color: {pnl_color}; margin-left: 6px;">(ROE {roe_unrealized:+.2%})</span>
+<div style="font-size: 0.75rem; color: #94a3b8;">毛价差 ${gross_unrealized:+,.2f} | 扣4腿手续费 -${fee_est:,.2f}</div>
+</div>
+</div>
+<!-- 资金与仓位规格明细面板 -->
+<div style="background: rgba(30, 41, 59, 0.45); border-radius: 8px; padding: 10px 14px; margin-top: 10px; border: 1px solid rgba(255, 255, 255, 0.05);">
+<div style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 0.84rem; color: #f1f5f9;">
+<span>💰 单边名义货值: <b style="color:#38bdf8;">${pos_size:,.2f}</b></span>
+<span>🌐 双边总敞口: <b style="color:#a78bfa;">${dual_notional:,.2f}</b> <small style="color:#94a3b8;">(2 × 单边)</small></span>
+<span>🛡️ 实缴总保证金: <b style="color:#fbbf24;">${tot_margin:,.2f}</b> <small style="color:#94a3b8;">({pos_lev:.0f}x 杠杆)</small></span>
+<span>💳 预估4腿手续费: <b style="color:#f87171;">-${fee_est:,.2f}</b></span>
+</div>
+<div style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 0.78rem; color: #cbd5e1; margin-top: 6px; border-top: 1px dashed rgba(255, 255, 255, 0.1); padding-top: 6px;">
+<span>🔹 腿1 ({c1}): <b>{side1} {amt1:,.4f} {tok}</b> @ 开仓 ${p1_entry:.4f} (当前 ${p1_curr:.4f} | 货值 ${pos_size:,.2f} | 押金 ${margin1:,.2f})</span>
+<span>🔸 腿2 ({c2}): <b>{side2} {amt2:,.4f} {tok}</b> @ 开仓 ${p2_entry:.4f} (当前 ${p2_curr:.4f} | 货值 ${pos_size:,.2f} | 押金 ${margin2:,.2f})</span>
+</div>
+</div>
+<div style="display: flex; justify-content: space-between; margin-top: 10px; font-size: 0.82rem; color: #cbd5e1; flex-wrap: wrap; gap: 6px;">
+<span>开仓基差: <b>{entry_basis:+.2%}</b></span>
+<span>当前实时基差: <b>{curr_basis:+.2%}</b></span>
+<span>目标止盈线: <b>≤ ±{target_comp:.2%}</b></span>
+<span>已结资金费: <b style="color: #10b981;">+${carry:.2f}</b> <small style="color:#94a3b8;">({settle_cnt}周期)</small></span>
+<span>待结预估: <small style="color:#94a3b8;">+${indicative_carry:.2f}</small></span>
+</div>
+<div style="margin-top: 8px;">
+<div style="display: flex; justify-content: space-between; font-size: 0.72rem; color: #94a3b8; margin-bottom: 2px;">
+<span>均值回归收敛进度</span>
+<span>{progress_pct:.1f}%</span>
+</div>
+<div style="background: #1e293b; height: 6px; border-radius: 3px; overflow: hidden;">
+<div style="background: linear-gradient(90deg, #3b82f6, #10b981); width: {progress_pct}%; height: 100%;"></div>
+</div>
+</div>
+</div>"""
+                if hasattr(st, "html"):
+                    st.html(pos_card_html)
+                else:
+                    st.markdown(pos_card_html, unsafe_allow_html=True)
 
     with tab_closed:
         if not closed_trades:

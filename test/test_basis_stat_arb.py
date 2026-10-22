@@ -233,6 +233,10 @@ view.render_basis_stat_arb_tables(data, "test-bot")
 '''
         app = AppTest.from_string(code, default_timeout=20).run()
         self.assertFalse(app.exception, [r.value for r in app.exception])
+        # Verify active position renders as clean HTML without leaking raw code blocks into markdown
+        if hasattr(app, "html") and len(app.html) > 0:
+            self.assertTrue(any("资金与仓位规格明细面板" in h.value for h in app.html))
+        self.assertFalse(any("<!-- 资金与仓位规格明细面板 -->" in m.value for m in app.markdown))
 
 
 if __name__ == "__main__":
