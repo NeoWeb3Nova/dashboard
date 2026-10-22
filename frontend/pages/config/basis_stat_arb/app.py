@@ -309,6 +309,17 @@ with col_guard2:
     )
     taker_fee_rate = taker_fee_rate_input / 100.0
 
+    simulated_latency_slippage_bps = st.number_input(
+        "模拟网络时延与逆向跳价滑点 (bps/腿)",
+        min_value=0.0,
+        max_value=20.0,
+        value=2.0,
+        step=0.5,
+        format="%.1f",
+        help="Dry-Run 模式下模拟公网传输时延（30~150ms）造成的每腿逆向成交价格漂移（2.0 bps 即 0.02% / 腿，往返四腿共 8.0 bps）"
+    )
+    simulated_latency_slippage_pct = simulated_latency_slippage_bps / 10000.0
+
     settlement_blackout_seconds = st.number_input(
         "资金费结算避让保护窗 (秒)",
         min_value=0,
@@ -368,6 +379,7 @@ config_dict = {
     "min_holding_seconds": int(min_holding_seconds),
     "exit_persistence_ticks": int(exit_persistence_ticks),
     "taker_fee_rate": float(taker_fee_rate),
+    "simulated_latency_slippage_pct": float(simulated_latency_slippage_pct),
     "settlement_blackout_seconds": int(settlement_blackout_seconds),
 }
 

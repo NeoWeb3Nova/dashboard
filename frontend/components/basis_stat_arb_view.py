@@ -116,6 +116,10 @@ def render_basis_stat_arb_kpi_cards(arb_data, total_volume_traded=0.0):
     total_realized_pnl = sum(float(t.get("total_net_pnl", 0)) for t in closed_trades)
     total_trading_fees = sum(float(t.get("trading_fee", 3.0)) for t in closed_trades)
     total_gross_trading = sum(float(t.get("gross_trading_pnl", float(t.get("trading_pnl", 0)) + float(t.get("trading_fee", 3.0)))) for t in closed_trades)
+    total_depth_slip = sum(float(t.get("depth_slippage_cost", 0.0)) for t in closed_trades)
+    total_latency_slip = sum(float(t.get("latency_slippage_cost", 0.0)) for t in closed_trades)
+    total_friction = sum(float(t.get("total_friction_cost", float(t.get("trading_fee", 3.0)) + float(t.get("depth_slippage_cost", 0.0)) + float(t.get("latency_slippage_cost", 0.0)))) for t in closed_trades)
+    avg_alpha_retention = (total_realized_pnl / total_gross_trading * 100.0) if total_gross_trading > 0 else 0.0
 
     unrealized_trading_pnl = sum(float(p.get("unrealized_trading_pnl", 0)) for p in active_pos)
     unrealized_settled_funding = sum(float(p.get("settled_funding_pnl", p.get("funding_income", 0))) for p in active_pos)
@@ -131,7 +135,7 @@ def render_basis_stat_arb_kpi_cards(arb_data, total_volume_traded=0.0):
     avg_hold_seconds = (sum(int(t.get("duration_seconds", 0)) for t in closed_trades) / len(closed_trades)) if closed_trades else 0.0
     avg_hold_str = format_precise_duration(avg_hold_seconds)
 
-    c1, c2, c3, c4, c5 = st.columns(5)
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
     with c1:
         st.metric(
             "💼 真实实缴总保证金",
@@ -143,11 +147,27 @@ def render_basis_stat_arb_kpi_cards(arb_data, total_volume_traded=0.0):
         st.metric(
             "🏦 已平仓战报结清净利",
             f"${total_realized_pnl:+,.2f}",
-            f"毛利 ${total_gross_trading:+,.1f} | 扣费 -${total_trading_fees:,.1f}",
+            f"胜率 {win_rate:.1f}% ({len(winning_trades)}/{len(closed_trades)} 胜)",
             delta_color="normal",
             help=f"所有已均值回归平仓的结清真金白银净收益。已扣除全部4腿真实Taker手续费（${total_trading_fees:,.2f}）。胜率 {win_rate:.1f}% ({len(winning_trades)}/{len(closed_trades)} 胜)"
         )
     with c3:
+        st.metric(
+            "⚡ 真实摩擦损耗穿透",
+            f"-${total_friction:,.2f}",
+            f"滑点 -${total_depth_slip + total_latency_slip:,.1f} | 佣金 -${total_trading_fees:,.1f}",
+            delta_color="inverse",
+            help=f"四腿全摩擦穿透：包含L2订单簿深度冲击滑点(-${total_depth_slip:,.2f})、网络时延跳价滑点(-${total_latency_slip:,.2f})、交易所4腿Taker手续费(-${total_trading_fees:,.2f})。"
+        )
+    with c4:
+        st.metric(
+            "🛡️ Alpha 净利留存率",
+            f"{avg_alpha_retention:.1f}%",
+            f"毛利 ${total_gross_trading:+,.1f}",
+            delta_color="normal",
+            help="理论纸面价差毛利在完全承受深度滑点、网络时延跳价与双边手续费后的净利润留存比例（Net PnL / Gross PnL）。"
+        )
+    with c5:
         st.metric(
             "📈 活跃持仓浮动净盈亏",
             f"${total_unrealized_pnl:+,.2f}",
@@ -155,20 +175,13 @@ def render_basis_stat_arb_kpi_cards(arb_data, total_volume_traded=0.0):
             delta_color="normal",
             help="当前活跃基差仓位的净浮动盈亏（已计入开平仓4腿手续费摩擦与动态盘口价差，随盘口基差压缩动态更新）"
         )
-    with c4:
+    with c6:
         st.metric(
-            "🎁 已结算资金费 (Settled Carry)",
+            "🎁 已结算资金费 (Settled)",
             f"${total_funding_harvested:+,.2f}",
-            f"已结 ${realized_funding_pnl:+,.2f} | 待结预估 ${unrealized_indicative_carry:+,.2f}",
+            f"周期 {avg_hold_str}",
             delta_color="normal",
-            help="持仓实际跨越交易所结算时点（Binance 8h / Hyperliquid 1h）真实入账的资金费现金流（未结算资金费绝不提前虚增利润）"
-        )
-    with c5:
-        st.metric(
-            "⏱️ 平均持仓平仓周期",
-            avg_hold_str,
-            f"胜率 {win_rate:.1f}% ({len(closed_trades)}笔)",
-            help="均值回归快速了结，绝不死扛，资金极速释放"
+            help="持仓实际跨越交易所结算时点（Binance 8h / Hyperliquid 1h）真实入账的资金费现金流。"
         )
 
 
@@ -360,6 +373,11 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
                 amt_1 = float(t.get("amount_1", pos_size_val / p1_ent if p1_ent > 0 else 0.0))
                 amt_2 = float(t.get("amount_2", pos_size_val / p2_ent if p2_ent > 0 else 0.0))
 
+                depth_slip_val = float(t.get("depth_slippage_cost", 0.0))
+                latency_slip_val = float(t.get("latency_slippage_cost", 0.0))
+                friction_tot = float(t.get("total_friction_cost", fee + depth_slip_val + latency_slip_val))
+                retention_pct = float(t.get("alpha_retention_pct", (tot_pnl / gross_tpnl * 100.0) if gross_tpnl > 0 else 0.0))
+
                 closed_rows.append({
                     "平仓时间": format_timestamp(t.get("close_timestamp", 0), active_tz),
                     "标的": t.get("token", ""),
@@ -371,13 +389,17 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
                     "实缴保证金": f"${margin_val:,.2f} ({lev_val:.0f}x)",
                     "开仓基差": f"{float(t.get('entry_basis_pct', 0)):+.2%}",
                     "平仓基差": f"{float(t.get('close_basis_pct', 0)):+.2%}",
-                    "毛价差盈亏": f"${gross_tpnl:+,.2f}",
+                    "理论毛价差": f"${gross_tpnl:+,.2f}",
+                    "深度滑点损耗": f"-${depth_slip_val:,.2f}",
+                    "时延跳价损耗": f"-${latency_slip_val:,.2f}",
                     "预估总手续费": f"-${fee:,.2f}",
+                    "摩擦总成本": f"-${friction_tot:,.2f}",
                     "价差净利润": f"${net_tpnl:+,.2f}",
                     "已结资金费": f"${fpnl:+,.2f}",
                     "跨越结算窗口": f"{t.get('settlement_count', 0)} 周期",
                     "结清真实净利": f"${tot_pnl:+,.2f}",
                     "真实本金 ROE": f"{roe_pct:+.2%}",
+                    "Alpha 留存率": f"{retention_pct:.1f}%",
                     "平仓原因": t.get("close_reason", ""),
                 })
             df_closed = pd.DataFrame(closed_rows)

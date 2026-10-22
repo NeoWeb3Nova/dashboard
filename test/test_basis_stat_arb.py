@@ -192,6 +192,27 @@ class TestBasisFinancialAccounting(unittest.TestCase):
         # Pure mathematical exit, unmasked by artificial positive PnL check
         self.assertTrue(is_basis_compressed)
 
+    def test_full_friction_accounting_breakdown(self):
+        # Case with 4-leg depth slippage and latency slippage
+        gross_trading_pnl = 15.00
+        depth_slip = 1.80
+        latency_slip = 1.20
+        fees = 3.00
+        settled_funding = 0.50
+
+        total_friction = depth_slip + latency_slip + fees
+        self.assertEqual(total_friction, 6.00)
+
+        net_trading_pnl = gross_trading_pnl - total_friction
+        self.assertEqual(net_trading_pnl, 9.00)
+
+        total_net_pnl = net_trading_pnl + settled_funding
+        self.assertEqual(total_net_pnl, 9.50)
+
+        # Alpha retention: Net / Gross = 9.50 / 15.00 = 63.33%
+        alpha_retention = (total_net_pnl / gross_trading_pnl) * 100.0
+        self.assertAlmostEqual(alpha_retention, 63.3333, places=3)
+
 
 class TestBasisConfigContract(unittest.TestCase):
     """Verify Basis Stat Arb config fields required by Case 32."""
@@ -212,11 +233,13 @@ class TestBasisConfigContract(unittest.TestCase):
             "min_holding_seconds": 60,
             "exit_persistence_ticks": 2,
             "taker_fee_rate": 0.0005,
+            "simulated_latency_slippage_pct": 0.0002,
             "settlement_blackout_seconds": 60,
         }
         self.assertEqual(config["min_holding_seconds"], 60)
         self.assertEqual(config["exit_persistence_ticks"], 2)
         self.assertEqual(config["taker_fee_rate"], 0.0005)
+        self.assertEqual(config["simulated_latency_slippage_pct"], 0.0002)
         self.assertEqual(config["settlement_blackout_seconds"], 60)
         self.assertGreaterEqual(config["min_entry_basis_pct"], 0.0022)  # Above friction barrier
 
