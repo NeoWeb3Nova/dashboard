@@ -286,7 +286,9 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
     render_basis_stat_arb_kpi_cards(arb_data)
 
     # Dock Navigation Tabs
-    dock_banner_html = """<div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px; padding: 10px 16px; margin: 16px 0 12px 0; display: flex; align-items: center; justify-content: space-between;">
+    tick_latency = float(arb_data.get("tick_latency_ms", 15.0))
+    headroom_pct = max(0.0, 100.0 - (tick_latency / 1000.0 * 100.0))
+    dock_banner_html = f"""<div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px; padding: 10px 16px; margin: 16px 0 12px 0; display: flex; align-items: center; justify-content: space-between;">
 <div style="display: flex; align-items: center; gap: 10px;">
 <span style="font-size: 1.15rem;">⚡</span>
 <span style="font-weight: 700; color: #f8fafc; font-size: 0.95rem; letter-spacing: 0.3px;">
@@ -295,9 +297,12 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
 <span style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); padding: 2px 8px; border-radius: 6px; font-size: 0.72rem; font-weight: 600;">
 均值回归脉冲引擎
 </span>
+<span style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); padding: 2px 8px; border-radius: 6px; font-size: 0.72rem; font-weight: 600;">
+⏱️ 1秒巡检耗时: {tick_latency:.1f}ms (算力余量 {headroom_pct:.1f}%)
+</span>
 </div>
 <span style="color: #64748b; font-size: 0.75rem;">
-💡 捕捉 0.7%~1.2% 脉冲，0.15% 压缩极速收割
+💡 1秒本地内存撮合(0网络开销) · 捕捉 0.7%~1.2% 脉冲 · 0.15% 极速收割
 </span>
 </div>"""
     if hasattr(st, "html"):
