@@ -300,15 +300,16 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
 </div>
 <!-- 资金与仓位规格明细面板 -->
 <div style="background: rgba(30, 41, 59, 0.45); border-radius: 8px; padding: 10px 14px; margin-top: 10px; border: 1px solid rgba(255, 255, 255, 0.05);">
-<div style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 0.84rem; color: #f1f5f9;">
+<div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 0.84rem; color: #f1f5f9;">
 <span>💰 单边名义货值: <b style="color:#38bdf8;">${pos_size:,.2f}</b></span>
 <span>🌐 双边总敞口: <b style="color:#a78bfa;">${dual_notional:,.2f}</b> <small style="color:#94a3b8;">(2 × 单边)</small></span>
 <span>🛡️ 实缴总保证金: <b style="color:#fbbf24;">${tot_margin:,.2f}</b> <small style="color:#94a3b8;">({pos_lev:.0f}x 杠杆)</small></span>
 <span>💳 预估4腿手续费: <b style="color:#f87171;">-${fee_est:,.2f}</b></span>
+<span style="background: rgba(16, 185, 129, 0.2); color: #34d399; font-size: 0.72rem; padding: 1px 6px; border-radius: 4px; font-weight: 600;">🪙 严格等币数 (Delta-Zero)</span>
 </div>
 <div style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 0.78rem; color: #cbd5e1; margin-top: 6px; border-top: 1px dashed rgba(255, 255, 255, 0.1); padding-top: 6px;">
-<span>🔹 腿1 ({c1}): <b>{side1} {amt1:,.4f} {tok}</b> @ 开仓 ${p1_entry:.4f} (当前 ${p1_curr:.4f} | 货值 ${pos_size:,.2f} | 押金 ${margin1:,.2f})</span>
-<span>🔸 腿2 ({c2}): <b>{side2} {amt2:,.4f} {tok}</b> @ 开仓 ${p2_entry:.4f} (当前 ${p2_curr:.4f} | 货值 ${pos_size:,.2f} | 押金 ${margin2:,.2f})</span>
+<span>🔹 腿1 ({c1}): <b>{side1} {amt1:,.4f} {tok}</b> @ 开仓 ${p1_entry:.4f} (当前 ${p1_curr:.4f} | 货值 ${amt1 * p1_entry:,.2f} | 押金 ${margin1:,.2f})</span>
+<span>🔸 腿2 ({c2}): <b>{side2} {amt2:,.4f} {tok}</b> @ 开仓 ${p2_entry:.4f} (当前 ${p2_curr:.4f} | 货值 ${amt2 * p2_entry:,.2f} | 押金 ${margin2:,.2f})</span>
 </div>
 </div>
 <div style="display: flex; justify-content: space-between; margin-top: 10px; font-size: 0.82rem; color: #cbd5e1; flex-wrap: wrap; gap: 6px;">

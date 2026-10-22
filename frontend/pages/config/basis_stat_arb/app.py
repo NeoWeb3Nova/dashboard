@@ -169,14 +169,28 @@ with form_col1:
         help="用逗号分隔。强烈建议仅配置主流做市币（严禁配置无做市商的劣质山寨币）"
     )
 
+    if "pos_size_val" not in st.session_state:
+        st.session_state["pos_size_val"] = 1500.0
+
+    c_s1, c_s2 = st.columns(2)
+    with c_s1:
+        if st.button("🧪 影子微额压测 ($15/腿)", use_container_width=True):
+            st.session_state["pos_size_val"] = 15.0
+            st.rerun()
+    with c_s2:
+        if st.button("💼 稳健生产配置 ($1,500/腿)", use_container_width=True):
+            st.session_state["pos_size_val"] = 1500.0
+            st.rerun()
+
     pos_size_input = st.number_input(
         "单边开仓名义金额 (Quote Asset / USD)",
-        min_value=50.0,
+        min_value=10.0,
         max_value=50000.0,
-        value=1500.0,
-        step=100.0,
-        help="每个币种在两家交易所分别建立的名义头寸大小"
+        value=float(st.session_state["pos_size_val"]),
+        step=50.0 if st.session_state["pos_size_val"] >= 100.0 else 5.0,
+        help="每个币种在两家交易所分别建立的名义头寸大小。实盘前建议使用 $10~$15 进行影子微额压测"
     )
+    st.session_state["pos_size_val"] = float(pos_size_input)
 
     leverage_input = st.number_input(
         "杠杆倍数 (Leverage)",
@@ -194,7 +208,10 @@ with form_col1:
     four_leg_fee = single_quote * 0.0005 * 4.0
 
     details_html = f"""<div style="background: rgba(30, 41, 59, 0.45); border-radius: 8px; padding: 10px 14px; margin: 8px 0; border: 1px solid rgba(59, 130, 246, 0.25);">
-<div style="font-size: 0.78rem; font-weight: 700; color: #94a3b8; margin-bottom: 4px;">📊 单标的资金占用与对冲规格明细</div>
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+<span style="font-size: 0.78rem; font-weight: 700; color: #94a3b8;">📊 单标的资金占用与对冲规格明细</span>
+<span style="background: rgba(16, 185, 129, 0.2); color: #34d399; font-size: 0.72rem; padding: 1px 6px; border-radius: 4px; font-weight: 600;">🪙 严格币数等额 (Delta-Zero)</span>
+</div>
 <div style="display: flex; justify-content: space-between; font-size: 0.8rem; color: #cbd5e1; flex-wrap: wrap; gap: 6px;">
 <span>💰 单边名义货值: <b style="color: #38bdf8;">${single_quote:,.2f}</b></span>
 <span>🌐 双边总敞口: <b style="color: #a78bfa;">${dual_quote:,.2f}</b></span>
@@ -212,12 +229,12 @@ with form_col2:
 
     min_entry_basis_pct = st.number_input(
         "基差偏离入场门槛 (%)",
-        min_value=0.15,
+        min_value=0.20,
         max_value=3.00,
-        value=0.32,
+        value=0.70,
         step=0.01,
         format="%.2f",
-        help="当两所归一化可成交价差偏离达到此数值时触发展开入场。实测双边往返硬摩擦约 0.22%，推荐 0.32% (32 bps) 既能覆盖摩擦又兼顾活跃度。"
+        help="当两所可成交价差偏离达到此数值时触发展开入场。机构级安全区间为 0.60% ~ 0.80% (60~80 bps)，推荐 0.70% (70 bps) 留足滑点与时延安全垫，专抓高胜率异常脱锚。"
     ) / 100.0
 
     tp_compression_pct = st.number_input(
