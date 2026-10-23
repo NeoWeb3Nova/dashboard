@@ -639,6 +639,8 @@ class TestClosedTradesMultiModePresentation(unittest.TestCase):
         self.assertIn("+0.72%", card_html)
         self.assertIn("+$18.42 USD", card_html)
         self.assertIn("+3.68% ROE", card_html)
+        self.assertIn("实际捕获基差", card_html)
+        self.assertIn("+68.0 bps", card_html)
         self.assertIn("Alpha 留存", card_html)
         self.assertIn("Delta-Zero", card_html)
         self.assertIn("财务穿透与摩擦拆解瀑布流", card_html)
@@ -693,6 +695,65 @@ view.render_basis_stat_arb_tables(data, "test-bot")
         radio_opts = app.radio[0].options
         self.assertTrue(any("卡片流" in opt for opt in radio_opts))
         self.assertTrue(any("数据大表" in opt for opt in radio_opts))
+
+    def test_closed_trades_table_captured_basis_column(self):
+        """Verify closed trades data table contains 实际捕获基差 (BPS) column in expected order."""
+        from streamlit.testing.v1 import AppTest
+        code = '''
+import frontend.components.basis_stat_arb_view as view
+data = {
+    "strategy": "basis_stat_arb",
+    "is_dry_run": True,
+    "active_positions": [],
+    "closed_trades": [
+        {
+            "token": "REZ",
+            "connector_1": "hyperliquid_perpetual",
+            "connector_2": "binance_perpetual",
+            "side_1": "SELL",
+            "side_2": "BUY",
+            "amount_1": 1000.0,
+            "amount_2": 1000.0,
+            "entry_price_1": 0.05,
+            "entry_price_2": 0.049,
+            "close_price_1": 0.048,
+            "close_price_2": 0.048,
+            "entry_basis_pct": 0.0052,
+            "close_basis_pct": 0.0002,
+            "captured_basis_bps": 50.0,
+            "captured_basis_pct": 0.0050,
+            "position_size": 500.0,
+            "total_notional": 1000.0,
+            "leverage": 3,
+            "total_margin": 333.33,
+            "gross_trading_pnl": 2.5,
+            "trading_fee": 0.5,
+            "total_friction_cost": 0.8,
+            "funding_pnl": 0.0,
+            "total_net_pnl": 1.7,
+            "close_reason": "Basis Mean-Reversion TP",
+            "close_timestamp": 1729600000,
+            "duration_seconds": 60,
+        }
+    ],
+    "market_comparison": [],
+}
+view.render_basis_stat_arb_tables(data, "test-bot")
+'''
+        app = AppTest.from_string(code, default_timeout=20).run()
+        self.assertFalse(app.exception, [r.value for r in app.exception])
+        self.assertTrue(len(app.dataframe) >= 1)
+        df_cols = list(app.dataframe[0].value.columns)
+        self.assertIn("实际捕获基差 (BPS)", df_cols)
+        self.assertIn("平仓基差", df_cols)
+        self.assertIn("开仓基差", df_cols)
+        col_idx_close = df_cols.index("平仓基差")
+        col_idx_cap = df_cols.index("实际捕获基差 (BPS)")
+        col_idx_gross = df_cols.index("理论毛价差")
+        self.assertEqual(col_idx_cap, col_idx_close + 1)
+        self.assertEqual(col_idx_gross, col_idx_cap + 1)
+        row_val = app.dataframe[0].value.iloc[0]["实际捕获基差 (BPS)"]
+        self.assertIn("50.0 bps", row_val)
 
 
 if __name__ == "__main__":

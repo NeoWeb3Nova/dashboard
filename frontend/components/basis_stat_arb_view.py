@@ -83,6 +83,8 @@ def _render_closed_trade_card_html(p: dict) -> str:
     close_time_str = p["close_time_str"]
     entry_b = p["entry_basis"]
     close_b = p["close_basis"]
+    cap_bps = p.get("captured_basis_bps", (entry_b - close_b) * 10000.0)
+    cap_pct = p.get("captured_basis_pct", cap_bps / 10000.0)
     comp_pct = p["compression_pct"]
     pos_sz = p["pos_size_val"]
     dual_notional = p["dual_notional_val"]
@@ -127,6 +129,9 @@ def _render_closed_trade_card_html(p: dict) -> str:
             {side1} {c1} + {side2} {c2}
         </span>
         {reason_badge}
+        <span style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.35); padding: 2px 7px; border-radius: 5px; font-size: 0.75rem; font-weight: 700; font-family: monospace;">
+            🎯 捕获基差: {cap_bps:+.1f} bps
+        </span>
         <span style="color: #94a3b8; font-size: 0.8rem; margin-left: 4px;">⏱️ 历时: <b style="color: #f1f5f9;">{dur_str}</b></span>
         <span style="color: #64748b; font-size: 0.75rem;">(平仓于 {close_time_str})</span>
     </div>
@@ -151,9 +156,11 @@ def _render_closed_trade_card_html(p: dict) -> str:
                 {entry_b:+.2%} ({entry_b*10000:+.0f} bps)
             </span>
         </div>
-        <div style="display: flex; align-items: center; gap: 6px; color: #38bdf8; font-weight: 600; font-size: 0.8rem;">
-            <span>均值归拢收敛度 <b>{comp_pct:.1f}%</b></span>
-            <span style="color: #64748b; font-size: 0.74rem;">(离散收窄 {abs(entry_b - close_b)*10000:.0f} bps)</span>
+        <div style="display: flex; align-items: center; gap: 6px;">
+            <span style="background: rgba(56, 189, 248, 0.18); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.4); padding: 2px 8px; border-radius: 5px; font-weight: 700; font-size: 0.82rem; font-family: monospace;">
+                🎯 实际捕获基差: {cap_bps:+.1f} bps ({cap_pct:+.2%})
+            </span>
+            <span style="color: #64748b; font-size: 0.74rem;">(均值归拢收敛度 <b>{comp_pct:.1f}%</b>)</span>
         </div>
         <div style="display: flex; align-items: center; gap: 6px;">
             <span style="color: #94a3b8;">🏁 出场收敛基差:</span>
@@ -223,6 +230,7 @@ def render_closed_trades_analytics(parsed_trades: list):
             f"#{i} {t['token']}<br>"
             f"净利: ${t['real_net_trade']:+,.2f}<br>"
             f"ROE: {t['roe_pct']:+.2%}<br>"
+            f"捕获基差: {t['captured_basis_bps']:+.1f} bps<br>"
             f"收敛: {t['compression_pct']:.1f}%<br>"
             f"平仓基差: {t['close_basis']:+.2%}<br>"
             f"原因: {t['close_reason'][:25]}"
@@ -726,11 +734,25 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
                 p1_close = float(t.get("close_price_1", 0.0))
                 p2_close = float(t.get("close_price_2", 0.0))
 
+                side_1 = t.get("side_1", "SELL")
                 entry_basis = float(t.get("entry_basis_pct", 0.0))
                 close_basis = float(t.get("close_basis_pct", 0.0))
                 abs_entry = abs(entry_basis)
                 abs_close = abs(close_basis)
                 compression_pct = max(0.0, min(100.0, (1.0 - (abs_close / abs_entry)) * 100.0)) if abs_entry > 0 else 100.0
+
+                # Calculate or retrieve actual captured basis in bps
+                captured_basis_bps = t.get("captured_basis_bps")
+                if captured_basis_bps is None:
+                    if side_1 == "SELL":
+                        c_pct = entry_basis - close_basis
+                    else:
+                        c_pct = entry_basis + close_basis
+                    captured_basis_bps = c_pct * 10000.0
+                    captured_basis_pct = c_pct
+                else:
+                    captured_basis_bps = float(captured_basis_bps)
+                    captured_basis_pct = float(t.get("captured_basis_pct", captured_basis_bps / 10000.0))
 
                 roe_pct = real_net_trade / margin_val if margin_val > 0 else 0.0
                 retention_pct = (real_net_trade / gross_tpnl * 100.0) if gross_tpnl > 0 else (100.0 if real_net_trade >= 0 else 0.0)
@@ -743,7 +765,7 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
                     "token": t.get("token", ""),
                     "connector_1": t.get("connector_1", "hyperliquid_perpetual"),
                     "connector_2": t.get("connector_2", "binance_perpetual"),
-                    "side_1": t.get("side_1", "SELL"),
+                    "side_1": side_1,
                     "side_2": t.get("side_2", "BUY"),
                     "amt_1": amt_1,
                     "amt_2": amt_2,
@@ -753,6 +775,8 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
                     "p2_close": p2_close,
                     "entry_basis": entry_basis,
                     "close_basis": close_basis,
+                    "captured_basis_pct": captured_basis_pct,
+                    "captured_basis_bps": captured_basis_bps,
                     "compression_pct": compression_pct,
                     "pos_size_val": pos_size_val,
                     "dual_notional_val": dual_notional_val,
@@ -871,6 +895,7 @@ Alpha 留存率 {overall_ret:.1f}%
                     "实缴保证金": f"${p['margin_val']:,.2f} ({p['lev_val']:.0f}x)",
                     "开仓基差": f"{p['entry_basis']:+.2%}",
                     "平仓基差": f"{p['close_basis']:+.2%}",
+                    "实际捕获基差 (BPS)": f"{p['captured_basis_bps']:+.1f} bps ({p['captured_basis_pct']:+.2%})",
                     "理论毛价差": f"${p['gross_tpnl']:+,.2f}",
                     "深度滑点损耗": f"-${p['depth_slip_val']:,.2f}",
                     "时延跳价损耗": f"-${p['latency_slip_val']:,.2f}",
