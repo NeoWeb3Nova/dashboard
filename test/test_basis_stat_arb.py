@@ -755,6 +755,108 @@ view.render_basis_stat_arb_tables(data, "test-bot")
         row_val = app.dataframe[0].value.iloc[0]["实际捕获基差 (BPS)"]
         self.assertIn("50.0 bps", row_val)
 
+    def test_closed_trades_time_filter_and_sorting(self):
+        """Verify closed trades filter by close time window and sort by close timestamp."""
+        import time as _t
+        now_ts = _t.time()
+        from streamlit.testing.v1 import AppTest
+        code = f'''
+import frontend.components.basis_stat_arb_view as view
+now = {now_ts}
+data = {{
+    "strategy": "basis_stat_arb",
+    "is_dry_run": True,
+    "active_positions": [],
+    "closed_trades": [
+        {{
+            "token": "OLD_TOK",
+            "connector_1": "hyperliquid_perpetual",
+            "connector_2": "binance_perpetual",
+            "side_1": "SELL",
+            "side_2": "BUY",
+            "amount_1": 100.0,
+            "amount_2": 100.0,
+            "entry_price_1": 1.0,
+            "entry_price_2": 1.0,
+            "close_price_1": 1.0,
+            "close_price_2": 1.0,
+            "entry_basis_pct": 0.01,
+            "close_basis_pct": 0.0,
+            "position_size": 100.0,
+            "total_notional": 200.0,
+            "leverage": 3,
+            "total_margin": 66.66,
+            "gross_trading_pnl": 5.0,
+            "trading_fee": 0.2,
+            "total_friction_cost": 0.3,
+            "funding_pnl": 0.0,
+            "total_net_pnl": 4.7,
+            "close_reason": "TP",
+            "close_timestamp": now - 7200,  # 2 hours ago
+            "duration_seconds": 60,
+        }},
+        {{
+            "token": "RECENT_TOK",
+            "connector_1": "hyperliquid_perpetual",
+            "connector_2": "binance_perpetual",
+            "side_1": "SELL",
+            "side_2": "BUY",
+            "amount_1": 100.0,
+            "amount_2": 100.0,
+            "entry_price_1": 1.0,
+            "entry_price_2": 1.0,
+            "close_price_1": 1.0,
+            "close_price_2": 1.0,
+            "entry_basis_pct": 0.01,
+            "close_basis_pct": 0.0,
+            "position_size": 100.0,
+            "total_notional": 200.0,
+            "leverage": 3,
+            "total_margin": 66.66,
+            "gross_trading_pnl": 2.0,
+            "trading_fee": 0.2,
+            "total_friction_cost": 0.3,
+            "funding_pnl": 0.0,
+            "total_net_pnl": 1.7,
+            "close_reason": "TP",
+            "close_timestamp": now - 300,  # 5 minutes ago
+            "duration_seconds": 30,
+        }}
+    ],
+    "market_comparison": [],
+}}
+view.render_basis_stat_arb_tables(data, "test-bot")
+'''
+        app = AppTest.from_string(code, default_timeout=20).run()
+        self.assertFalse(app.exception, [r.value for r in app.exception])
+
+        # Verify default order: "🕒 平仓时间 (最新在前)" so RECENT_TOK is first
+        df_val = app.dataframe[0].value
+        self.assertEqual(len(df_val), 2)
+        self.assertEqual(df_val.iloc[0]["标的"], "RECENT_TOK")
+        self.assertEqual(df_val.iloc[1]["标的"], "OLD_TOK")
+
+        # Verify time filter selectbox exists and test filtering by past 1 hour
+        time_boxes = [sb for sb in app.selectbox if "平仓时段" in sb.label]
+        self.assertEqual(len(time_boxes), 1)
+        time_sb = time_boxes[0]
+        self.assertIn("过去 1 小时内", time_sb.options)
+        self.assertIn("全部平仓时段", time_sb.options)
+
+        # Select "过去 1 小时内" -> only RECENT_TOK should remain
+        time_sb.select("过去 1 小时内").run()
+        self.assertFalse(app.exception, [r.value for r in app.exception])
+        df_filtered = app.dataframe[0].value
+        self.assertEqual(len(df_filtered), 1)
+        self.assertEqual(df_filtered.iloc[0]["标的"], "RECENT_TOK")
+
+        # Verify sort selectbox exists and test sorting by profit descending
+        sort_boxes = [sb for sb in app.selectbox if "排序方式" in sb.label]
+        self.assertEqual(len(sort_boxes), 1)
+        sort_sb = sort_boxes[0]
+        self.assertIn("🕒 平仓时间 (最新在前)", sort_sb.options)
+        self.assertIn("💰 真实纯利 (从高到低)", sort_sb.options)
+
 
 if __name__ == "__main__":
     unittest.main()

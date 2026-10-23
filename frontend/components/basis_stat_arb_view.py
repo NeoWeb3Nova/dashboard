@@ -857,8 +857,8 @@ Alpha 留存率 {overall_ret:.1f}%
                 st.markdown(perf_strip_html, unsafe_allow_html=True)
 
             # View Mode Controller & Filter Bar
-            ctrl_c1, ctrl_c2, ctrl_c3 = st.columns([2.4, 1.2, 1.2])
-            with ctrl_c1:
+            v_col, _ = st.columns([3.2, 0.8])
+            with v_col:
                 closed_view_mode = st.radio(
                     "战绩展示视角",
                     ["🎴 机构对账单卡片流 (Visual Cards)", "📈 收益走势与标的透视 (Analytics)", "📋 全维数据大表 (Data Table)"],
@@ -866,20 +866,97 @@ Alpha 留存率 {overall_ret:.1f}%
                     key=f"closed_view_mode_{bot_name}",
                     label_visibility="collapsed",
                 )
-            with ctrl_c2:
+
+            ctrl_c1, ctrl_c2, ctrl_c3, ctrl_c4 = st.columns([1.1, 1.1, 1.3, 1.5])
+            with ctrl_c1:
                 tok_choices = ["全部标的"] + sorted(list(set(p["token"] for p in parsed_trades)))
-                filter_tok = st.selectbox("按标的筛选", tok_choices, key=f"closed_tok_{bot_name}", label_visibility="collapsed")
+                filter_tok = st.selectbox(
+                    "按标的筛选",
+                    tok_choices,
+                    key=f"closed_tok_{bot_name}",
+                    help="仅查看指定币种的历史平仓成交记录",
+                )
+            with ctrl_c2:
+                filter_res = st.selectbox(
+                    "按盈亏筛选",
+                    ["全部战报", f"🟢 仅看盈利 ({win_trades})", f"🔴 仅看亏损 ({loss_trades})"],
+                    key=f"closed_res_{bot_name}",
+                    help="按盈亏结果筛选交易记录",
+                )
             with ctrl_c3:
-                filter_res = st.selectbox("按盈亏筛选", ["全部战报", "仅看盈利 (Win)", "仅看亏损 (Loss)"], key=f"closed_res_{bot_name}", label_visibility="collapsed")
+                time_range_choices = [
+                    "全部平仓时段",
+                    "过去 1 小时内",
+                    "过去 6 小时内",
+                    "过去 12 小时内",
+                    "过去 24 小时内",
+                    "过去 3 天内",
+                    "过去 7 天内",
+                ]
+                filter_time = st.selectbox(
+                    "🕒 平仓时段过滤",
+                    time_range_choices,
+                    key=f"closed_time_{bot_name}",
+                    help="按平仓发生的时间跨度过滤记录",
+                )
+            with ctrl_c4:
+                sort_choices = [
+                    "🕒 平仓时间 (最新在前)",
+                    "🕒 平仓时间 (最早在前)",
+                    "💰 真实纯利 (从高到低)",
+                    "🛑 真实纯利 (从低到高)",
+                    "⏱️ 持仓历时 (从长到短)",
+                    "⚡ 实际捕获基差 (从大到小)",
+                ]
+                sort_opt = st.selectbox(
+                    "🔃 战绩排序方式",
+                    sort_choices,
+                    key=f"closed_sort_{bot_name}",
+                    help="切换战绩排序方式，默认按平仓时间倒序（最新平仓置顶）",
+                )
 
             # Apply filters
             filtered_trades = parsed_trades
             if filter_tok != "全部标的":
                 filtered_trades = [p for p in filtered_trades if p["token"] == filter_tok]
-            if filter_res == "仅看盈利 (Win)":
+            if "仅看盈利" in filter_res:
                 filtered_trades = [p for p in filtered_trades if p["real_net_trade"] > 0]
-            elif filter_res == "仅看亏损 (Loss)":
+            elif "仅看亏损" in filter_res:
                 filtered_trades = [p for p in filtered_trades if p["real_net_trade"] < 0]
+
+            if filter_time != "全部平仓时段":
+                import time as _py_time
+                now_sec = _py_time.time()
+                time_window_map = {
+                    "过去 1 小时内": 3600,
+                    "过去 6 小时内": 6 * 3600,
+                    "过去 12 小时内": 12 * 3600,
+                    "过去 24 小时内": 24 * 3600,
+                    "过去 3 天内": 3 * 86400,
+                    "过去 7 天内": 7 * 86400,
+                }
+                max_age_sec = time_window_map.get(filter_time, 86400 * 365)
+                max_trade_ts = max((p["close_time_ts"] for p in parsed_trades), default=now_sec)
+                anchor_now = max(now_sec, max_trade_ts)
+                filtered_trades = [p for p in filtered_trades if (anchor_now - p["close_time_ts"]) <= max_age_sec]
+
+            # Apply sorting
+            if "平仓时间 (最新在前)" in sort_opt:
+                filtered_trades = sorted(filtered_trades, key=lambda x: x["close_time_ts"], reverse=True)
+            elif "平仓时间 (最早在前)" in sort_opt:
+                filtered_trades = sorted(filtered_trades, key=lambda x: x["close_time_ts"], reverse=False)
+            elif "真实纯利 (从高到低)" in sort_opt:
+                filtered_trades = sorted(filtered_trades, key=lambda x: x["real_net_trade"], reverse=True)
+            elif "真实纯利 (从低到高)" in sort_opt:
+                filtered_trades = sorted(filtered_trades, key=lambda x: x["real_net_trade"], reverse=False)
+            elif "持仓历时 (从长到短)" in sort_opt:
+                filtered_trades = sorted(filtered_trades, key=lambda x: x["dur_sec"], reverse=True)
+            elif "实际捕获基差 (从大到小)" in sort_opt or "捕获基差" in sort_opt:
+                filtered_trades = sorted(filtered_trades, key=lambda x: x["captured_basis_bps"], reverse=True)
+            else:
+                filtered_trades = sorted(filtered_trades, key=lambda x: x["close_time_ts"], reverse=True)
+
+            st.caption(f"ℹ️ 当前显示 **{len(filtered_trades)} / {tot_trades}** 笔已结算战绩 · 排序：**{sort_opt}** · 时段：**{filter_time}**")
 
             # Generate dataframe for Table View and expander
             closed_rows = []
