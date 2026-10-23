@@ -5,6 +5,12 @@ from datetime import datetime, timezone
 import pandas as pd
 import streamlit as st
 
+try:
+    import plotly.graph_objects as go
+    HAS_PLOTLY = True
+except ImportError:
+    HAS_PLOTLY = False
+
 from frontend.components.clock_monitor import get_exchange_clock_health
 from frontend.components.timezone_utils import render_timezone_selector, format_timestamp
 
@@ -54,6 +60,235 @@ def resolve_trade_friction(t):
         tot_friction = fee + depth_slip + latency_slip
 
     return fee, depth_slip, latency_slip, tot_friction
+
+
+def _render_closed_trade_card_html(p: dict) -> str:
+    """Render an institutional-grade visual execution card for a single closed trade."""
+    tok = p["token"]
+    side1 = p["side_1"]
+    side2 = p["side_2"]
+    c1 = p["connector_1"]
+    c2 = p["connector_2"]
+    net = p["real_net_trade"]
+    gross = p["gross_tpnl"]
+    fee = p["fee"]
+    depth_slip = p["depth_slip_val"]
+    latency_slip = p["latency_slip_val"]
+    fric_tot = p["friction_tot"]
+    fpnl = p["fpnl"]
+    settle_cnt = p["settle_cnt"]
+    roe = p["roe_pct"]
+    retention = p["retention_pct"]
+    dur_str = p["dur_str"]
+    close_time_str = p["close_time_str"]
+    entry_b = p["entry_basis"]
+    close_b = p["close_basis"]
+    comp_pct = p["compression_pct"]
+    pos_sz = p["pos_size_val"]
+    dual_notional = p["dual_notional_val"]
+    lev = p["lev_val"]
+    margin = p["margin_val"]
+    amt1 = p["amt_1"]
+    amt2 = p["amt_2"]
+    p1_ent = p["p1_ent"]
+    p2_ent = p["p2_ent"]
+    p1_cls = p["p1_close"]
+    p2_cls = p["p2_close"]
+    reason = p["close_reason"]
+
+    if "TP" in reason or "Mean-Reversion" in reason or "take_profit" in reason or "compression" in reason.lower():
+        reason_badge = '<span style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); padding: 2px 7px; border-radius: 4px; font-size: 0.72rem; font-weight: 600;">🟢 均值回归达标止盈</span>'
+    elif "trailing" in reason.lower():
+        reason_badge = '<span style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); padding: 2px 7px; border-radius: 4px; font-size: 0.72rem; font-weight: 600;">🟡 移动止盈回撤保利</span>'
+    elif "stop" in reason.lower():
+        reason_badge = '<span style="background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); padding: 2px 7px; border-radius: 4px; font-size: 0.72rem; font-weight: 600;">🔴 基差离散风控止损</span>'
+    elif "timeout" in reason.lower() or "hold" in reason.lower():
+        reason_badge = '<span style="background: rgba(148, 163, 184, 0.2); color: #cbd5e1; border: 1px solid rgba(148, 163, 184, 0.4); padding: 2px 7px; border-radius: 4px; font-size: 0.72rem; font-weight: 600;">⏳ 最大持仓超时平仓</span>'
+    else:
+        reason_badge = f'<span style="background: rgba(59, 130, 246, 0.2); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.4); padding: 2px 7px; border-radius: 4px; font-size: 0.72rem; font-weight: 600;">🏁 {reason[:20]}</span>'
+
+    pnl_color = "#10b981" if net >= 0 else "#ef4444"
+    pnl_bg = "rgba(16, 185, 129, 0.15)" if net >= 0 else "rgba(239, 68, 68, 0.15)"
+    pnl_border = "rgba(16, 185, 129, 0.3)" if net >= 0 else "rgba(239, 68, 68, 0.3)"
+    card_border = "rgba(16, 185, 129, 0.3)" if net >= 0 else "rgba(239, 68, 68, 0.3)"
+
+    p1_cls_str = f"${p1_cls:,.4f}" if p1_cls > 0 else "市价结算"
+    p2_cls_str = f"${p2_cls:,.4f}" if p2_cls > 0 else "市价结算"
+
+    net_str = f"+${net:,.2f}" if net >= 0 else f"-${abs(net):,.2f}"
+    gross_str = f"+${gross:,.2f}" if gross >= 0 else f"-${abs(gross):,.2f}"
+    fpnl_str = f"+${fpnl:,.2f}" if fpnl >= 0 else f"-${abs(fpnl):,.2f}"
+
+    return f"""<div style="background: rgba(15, 23, 42, 0.7); border: 1px solid {card_border}; border-radius: 12px; padding: 16px 18px; margin-bottom: 14px; box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.35);">
+<div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+    <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 6px;">
+        <span style="font-size: 1.25rem; font-weight: 800; color: #f8fafc; letter-spacing: 0.02em;">🪙 {tok}</span>
+        <span style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); padding: 2px 7px; border-radius: 5px; font-size: 0.75rem; font-weight: 600;">
+            {side1} {c1} + {side2} {c2}
+        </span>
+        {reason_badge}
+        <span style="color: #94a3b8; font-size: 0.8rem; margin-left: 4px;">⏱️ 历时: <b style="color: #f1f5f9;">{dur_str}</b></span>
+        <span style="color: #64748b; font-size: 0.75rem;">(平仓于 {close_time_str})</span>
+    </div>
+    <div style="text-align: right;">
+        <div style="display: flex; align-items: baseline; justify-content: flex-end; gap: 8px;">
+            <span style="font-size: 1.35rem; font-weight: 800; color: {pnl_color}; letter-spacing: -0.01em;">{net_str} USD</span>
+            <span style="background: {pnl_bg}; color: {pnl_color}; border: 1px solid {pnl_border}; padding: 2px 8px; border-radius: 6px; font-size: 0.82rem; font-weight: 700;">
+                {roe:+.2%} ROE
+            </span>
+        </div>
+        <div style="font-size: 0.75rem; color: #94a3b8; margin-top: 2px;">
+            理论毛利 <b style="color: #e2e8f0;">{gross_str}</b> · 摩擦损耗 <b style="color: #f87171;">-${fric_tot:,.2f}</b> · Alpha 留存 <b style="color: #38bdf8;">{retention:.1f}%</b>
+        </div>
+    </div>
+</div>
+
+<div style="background: rgba(15, 23, 42, 0.55); border: 1px solid rgba(255, 255, 255, 0.07); border-radius: 8px; padding: 10px 14px; margin-top: 12px;">
+    <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.82rem; margin-bottom: 6px; flex-wrap: wrap; gap: 4px;">
+        <div style="display: flex; align-items: center; gap: 6px;">
+            <span style="color: #94a3b8;">🎯 入场基差偏离:</span>
+            <span style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); padding: 1px 7px; border-radius: 4px; font-weight: 700; font-family: monospace;">
+                {entry_b:+.2%} ({entry_b*10000:+.0f} bps)
+            </span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 6px; color: #38bdf8; font-weight: 600; font-size: 0.8rem;">
+            <span>均值归拢收敛度 <b>{comp_pct:.1f}%</b></span>
+            <span style="color: #64748b; font-size: 0.74rem;">(离散收窄 {abs(entry_b - close_b)*10000:.0f} bps)</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 6px;">
+            <span style="color: #94a3b8;">🏁 出场收敛基差:</span>
+            <span style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); padding: 1px 7px; border-radius: 4px; font-weight: 700; font-family: monospace;">
+                {close_b:+.2%} ({close_b*10000:+.0f} bps)
+            </span>
+        </div>
+    </div>
+    <div style="background: #1e293b; height: 6px; border-radius: 3px; overflow: hidden;">
+        <div style="background: linear-gradient(90deg, #f59e0b 0%, #3b82f6 50%, #10b981 100%); width: {comp_pct}%; height: 100%;"></div>
+    </div>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin-top: 12px;">
+    <div style="background: rgba(30, 41, 59, 0.45); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 8px; padding: 10px 12px; font-size: 0.8rem; color: #cbd5e1;">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 6px; border-bottom: 1px dashed rgba(255, 255, 255, 0.08); padding-bottom: 4px;">
+            <span style="color: #94a3b8; font-weight: 600;">⚖️ 双边敞口与对冲规格</span>
+            <span style="color: #34d399; font-weight: 600;">🪙 等币数 Delta-Zero</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 3px;">
+            <span>单边货值: <b style="color: #38bdf8;">${pos_sz:,.2f}</b></span>
+            <span>双边总敞口: <b style="color: #a78bfa;">${dual_notional:,.2f}</b></span>
+            <span>实缴保证金: <b style="color: #fbbf24;">${margin:,.2f}</b> ({lev:.0f}x)</span>
+        </div>
+        <div style="font-size: 0.76rem; color: #94a3b8; margin-top: 6px;">
+            <div>🔹 {side1} {c1}: {amt1:,.4f} {tok} @ 开仓 ${p1_ent:.4f} ➔ 平仓 {p1_cls_str}</div>
+            <div style="margin-top: 2px;">🔸 {side2} {c2}: {amt2:,.4f} {tok} @ 开仓 ${p2_ent:.4f} ➔ 平仓 {p2_cls_str}</div>
+        </div>
+    </div>
+
+    <div style="background: rgba(30, 41, 59, 0.45); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 8px; padding: 10px 12px; font-size: 0.8rem; color: #cbd5e1;">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 6px; border-bottom: 1px dashed rgba(255, 255, 255, 0.08); padding-bottom: 4px;">
+            <span style="color: #94a3b8; font-weight: 600;">💳 财务穿透与摩擦拆解瀑布流</span>
+            <span style="color: #38bdf8; font-weight: 600;">实得净利 {net_str}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 3px;">
+            <span>理论毛价差: <b style="color: #f8fafc;">{gross_str}</b></span>
+            <span>预估手续费: <b style="color: #f87171;">-${fee:,.2f}</b></span>
+            <span>滑点与跳价: <b style="color: #f87171;">-${(depth_slip + latency_slip):,.2f}</b></span>
+        </div>
+        <div style="display: flex; justify-content: space-between; font-size: 0.76rem; color: #94a3b8; margin-top: 6px;">
+            <span>深度滑点: -${depth_slip:,.2f} | 时延跳价: -${latency_slip:,.2f}</span>
+            <span>已结资金费: <b style="color: #10b981;">{fpnl_str}</b> ({settle_cnt}周期)</span>
+        </div>
+    </div>
+</div>
+</div>"""
+
+
+def render_closed_trades_analytics(parsed_trades: list):
+    """Render interactive institutional charts for closed trades."""
+    if not HAS_PLOTLY or not parsed_trades:
+        st.info("ℹ️ 暂无足够图表数据或绘图库未加载。")
+        return
+
+    # Chronological sort for equity curve
+    chron_trades = sorted(parsed_trades, key=lambda x: x["close_time_ts"])
+
+    # 1. Cumulative Net PnL Curve
+    cum_pnl = 0.0
+    equity = []
+    hover_texts = []
+    for i, t in enumerate(chron_trades, 1):
+        cum_pnl += t["real_net_trade"]
+        equity.append(cum_pnl)
+        hover_texts.append(
+            f"#{i} {t['token']}<br>"
+            f"净利: ${t['real_net_trade']:+,.2f}<br>"
+            f"ROE: {t['roe_pct']:+.2%}<br>"
+            f"收敛: {t['compression_pct']:.1f}%<br>"
+            f"平仓基差: {t['close_basis']:+.2%}<br>"
+            f"原因: {t['close_reason'][:25]}"
+        )
+
+    fig_equity = go.Figure()
+    fig_equity.add_trace(go.Scatter(
+        x=list(range(1, len(equity) + 1)),
+        y=equity,
+        mode="lines+markers",
+        name="累计纯利 (USD)",
+        line=dict(color="#10b981", width=3, shape="hv"),
+        marker=dict(size=7, color="#34d399", line=dict(color="#064e3b", width=1.5)),
+        fill="tozeroy",
+        fillcolor="rgba(16, 185, 129, 0.12)",
+        text=hover_texts,
+        hoverinfo="text+y",
+    ))
+    fig_equity.update_layout(
+        title="📈 穿透累计纯利爬升曲线 (Cumulative Equity Curve)",
+        title_font=dict(size=14, color="#f8fafc"),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(15, 23, 42, 0.5)",
+        height=280,
+        margin=dict(l=40, r=20, t=40, b=30),
+        xaxis=dict(title="交易笔数 (Trades)", gridcolor="rgba(255,255,255,0.06)", tickfont=dict(color="#94a3b8")),
+        yaxis=dict(title="累计净利 (USD)", gridcolor="rgba(255,255,255,0.06)", tickprefix="$", tickfont=dict(color="#94a3b8")),
+        showlegend=False,
+    )
+
+    # 2. PnL Contribution by Token
+    token_pnl = {}
+    for t in parsed_trades:
+        token_pnl[t["token"]] = token_pnl.get(t["token"], 0.0) + t["real_net_trade"]
+
+    sorted_tokens = sorted(token_pnl.items(), key=lambda x: x[1], reverse=True)
+    tok_names = [x[0] for x in sorted_tokens]
+    tok_pnls = [x[1] for x in sorted_tokens]
+    bar_colors = ["#10b981" if v >= 0 else "#ef4444" for v in tok_pnls]
+
+    fig_bar = go.Figure()
+    fig_bar.add_trace(go.Bar(
+        x=tok_names,
+        y=tok_pnls,
+        marker=dict(color=bar_colors, line=dict(color="rgba(255,255,255,0.1)", width=1)),
+        text=[f"${v:+,.2f}" for v in tok_pnls],
+        textposition="outside",
+        textfont=dict(color="#cbd5e1", size=11),
+    ))
+    fig_bar.update_layout(
+        title="🪙 各标的累计贡献纯利排行 (Net PnL by Token)",
+        title_font=dict(size=14, color="#f8fafc"),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(15, 23, 42, 0.5)",
+        height=280,
+        margin=dict(l=40, r=20, t=40, b=30),
+        xaxis=dict(gridcolor="rgba(255,255,255,0.06)", tickfont=dict(color="#cbd5e1")),
+        yaxis=dict(title="累计贡献 (USD)", gridcolor="rgba(255,255,255,0.06)", tickprefix="$", tickfont=dict(color="#94a3b8")),
+        showlegend=False,
+    )
+
+    chart_c1, chart_c2 = st.columns(2)
+    with chart_c1:
+        st.plotly_chart(fig_equity, use_container_width=True)
+    with chart_c2:
+        st.plotly_chart(fig_bar, use_container_width=True)
 
 
 def get_bot_basis_stat_arb_data(bot_name, performance):
@@ -467,16 +702,17 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
         if not closed_trades:
             st.info("ℹ️ 暂无历史平仓结算战报。一旦基差完成均值回归或触发止盈，平仓记录将实时在此归档。")
         else:
-            closed_rows = []
+            # 1. Parse and normalize all closed trade records
+            parsed_trades = []
             for t in reversed(closed_trades):
                 dur_sec = int(t.get("duration_seconds", 0))
                 dur_str = format_precise_duration(dur_sec)
                 fee, depth_slip_val, latency_slip_val, friction_tot = resolve_trade_friction(t)
-                gross_tpnl = float(t.get("gross_trading_pnl", float(t.get("trading_pnl", 0)) + friction_tot))
-                fpnl = float(t.get("funding_pnl", 0))
+                gross_tpnl = float(t.get("gross_trading_pnl", float(t.get("trading_pnl", float(t.get("total_net_pnl", 0.0)))) + friction_tot))
+                fpnl = float(t.get("funding_pnl", 0.0))
                 real_net_trade = gross_tpnl - friction_tot + fpnl
                 paper_net = gross_tpnl - fee + fpnl
-                
+
                 pos_size_val = float(t.get("position_size", 1500.0))
                 dual_notional_val = float(t.get("total_notional", pos_size_val * 2.0))
                 lev_val = float(t.get("leverage") or leverage)
@@ -487,36 +723,207 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
                 p2_ent = float(t.get("entry_price_2", 0.0))
                 amt_1 = float(t.get("amount_1", pos_size_val / p1_ent if p1_ent > 0 else 0.0))
                 amt_2 = float(t.get("amount_2", pos_size_val / p2_ent if p2_ent > 0 else 0.0))
+                p1_close = float(t.get("close_price_1", 0.0))
+                p2_close = float(t.get("close_price_2", 0.0))
+
+                entry_basis = float(t.get("entry_basis_pct", 0.0))
+                close_basis = float(t.get("close_basis_pct", 0.0))
+                abs_entry = abs(entry_basis)
+                abs_close = abs(close_basis)
+                compression_pct = max(0.0, min(100.0, (1.0 - (abs_close / abs_entry)) * 100.0)) if abs_entry > 0 else 100.0
 
                 roe_pct = real_net_trade / margin_val if margin_val > 0 else 0.0
-                retention_pct = (real_net_trade / gross_tpnl * 100.0) if gross_tpnl > 0 else 0.0
+                retention_pct = (real_net_trade / gross_tpnl * 100.0) if gross_tpnl > 0 else (100.0 if real_net_trade >= 0 else 0.0)
+                retention_pct = max(-100.0, min(100.0, retention_pct))
 
+                settle_cnt = int(t.get("settlement_count") or len(set(fp.get("timestamp") for fp in t.get("funding_payments", []) if fp.get("timestamp"))))
+
+                parsed_trades.append({
+                    "raw": t,
+                    "token": t.get("token", ""),
+                    "connector_1": t.get("connector_1", "hyperliquid_perpetual"),
+                    "connector_2": t.get("connector_2", "binance_perpetual"),
+                    "side_1": t.get("side_1", "SELL"),
+                    "side_2": t.get("side_2", "BUY"),
+                    "amt_1": amt_1,
+                    "amt_2": amt_2,
+                    "p1_ent": p1_ent,
+                    "p2_ent": p2_ent,
+                    "p1_close": p1_close,
+                    "p2_close": p2_close,
+                    "entry_basis": entry_basis,
+                    "close_basis": close_basis,
+                    "compression_pct": compression_pct,
+                    "pos_size_val": pos_size_val,
+                    "dual_notional_val": dual_notional_val,
+                    "lev_val": lev_val,
+                    "margin_val": margin_val,
+                    "gross_tpnl": gross_tpnl,
+                    "fee": fee,
+                    "depth_slip_val": depth_slip_val,
+                    "latency_slip_val": latency_slip_val,
+                    "friction_tot": friction_tot,
+                    "fpnl": fpnl,
+                    "settle_cnt": settle_cnt,
+                    "real_net_trade": real_net_trade,
+                    "paper_net": paper_net,
+                    "roe_pct": roe_pct,
+                    "retention_pct": retention_pct,
+                    "dur_sec": dur_sec,
+                    "dur_str": dur_str,
+                    "close_time_ts": float(t.get("close_timestamp", 0.0)),
+                    "close_time_str": format_timestamp(t.get("close_timestamp", 0), active_tz),
+                    "close_reason": t.get("close_reason", "take_profit"),
+                })
+
+            # 2. Overall Summary Metrics
+            tot_trades = len(parsed_trades)
+            win_trades = sum(1 for p in parsed_trades if p["real_net_trade"] > 0)
+            loss_trades = sum(1 for p in parsed_trades if p["real_net_trade"] < 0)
+            win_rate = (win_trades / tot_trades * 100.0) if tot_trades > 0 else 0.0
+            tot_net = sum(p["real_net_trade"] for p in parsed_trades)
+            tot_gross = sum(p["gross_tpnl"] for p in parsed_trades)
+            tot_fric = sum(p["friction_tot"] for p in parsed_trades)
+            tot_fee = sum(p["fee"] for p in parsed_trades)
+            tot_slip = tot_fric - tot_fee
+            avg_trade = tot_net / tot_trades if tot_trades > 0 else 0.0
+            avg_roe = (sum(p["roe_pct"] for p in parsed_trades) / tot_trades) if tot_trades > 0 else 0.0
+            overall_ret = (tot_net / tot_gross * 100.0) if tot_gross > 0 else 0.0
+
+            net_color = "#10b981" if tot_net >= 0 else "#ef4444"
+
+            # Top Performance Summary Strip
+            perf_strip_html = f"""<div style="background: rgba(15, 23, 42, 0.65); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: 10px; padding: 12px 16px; margin-bottom: 14px;">
+<div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+<div style="display: flex; align-items: center; gap: 18px; flex-wrap: wrap;">
+<div>
+<div style="font-size: 0.72rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em;">战绩总览与胜率</div>
+<div style="font-size: 1.15rem; font-weight: 700; color: #f8fafc; margin-top: 1px;">
+{tot_trades} 笔已结算 <span style="font-size: 0.85rem; color: #34d399; font-weight: 600; background: rgba(16, 185, 129, 0.15); padding: 1px 6px; border-radius: 4px; border: 1px solid rgba(16, 185, 129, 0.3);">{win_rate:.1f}% 胜率</span>
+<small style="font-size: 0.75rem; color: #94a3b8; margin-left: 4px;">({win_trades}胜 / {loss_trades}负)</small>
+</div>
+</div>
+<div style="border-left: 1px solid rgba(255, 255, 255, 0.1); padding-left: 18px;">
+<div style="font-size: 0.72rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em;">穿透结清真实纯利</div>
+<div style="font-size: 1.15rem; font-weight: 800; color: {net_color}; margin-top: 1px;">
+${tot_net:+,.2f} USD <span style="font-size: 0.78rem; color: #94a3b8; font-weight: normal;">(单均 ${avg_trade:+,.2f})</span>
+</div>
+</div>
+<div style="border-left: 1px solid rgba(255, 255, 255, 0.1); padding-left: 18px;">
+<div style="font-size: 0.72rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em;">单笔平均实缴 ROE</div>
+<div style="font-size: 1.15rem; font-weight: 700; color: #fbbf24; margin-top: 1px;">
+{avg_roe:+.2%} <small style="font-size: 0.75rem; color: #94a3b8;">(按实缴保证金计)</small>
+</div>
+</div>
+</div>
+<div style="text-align: right; border-left: 1px solid rgba(255, 255, 255, 0.1); padding-left: 18px;">
+<div style="font-size: 0.72rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em;">摩擦损耗与 Alpha 留存</div>
+<div style="font-size: 0.95rem; font-weight: 700; color: #38bdf8; margin-top: 1px;">
+Alpha 留存率 {overall_ret:.1f}%
+</div>
+<div style="font-size: 0.74rem; color: #94a3b8;">
+毛利 ${tot_gross:+,.2f} · 佣金 -${tot_fee:,.2f} · 滑点 -${tot_slip:,.2f}
+</div>
+</div>
+</div>
+</div>"""
+            if hasattr(st, "html"):
+                st.html(perf_strip_html)
+            else:
+                st.markdown(perf_strip_html, unsafe_allow_html=True)
+
+            # View Mode Controller & Filter Bar
+            ctrl_c1, ctrl_c2, ctrl_c3 = st.columns([2.4, 1.2, 1.2])
+            with ctrl_c1:
+                closed_view_mode = st.radio(
+                    "战绩展示视角",
+                    ["🎴 机构对账单卡片流 (Visual Cards)", "📈 收益走势与标的透视 (Analytics)", "📋 全维数据大表 (Data Table)"],
+                    horizontal=True,
+                    key=f"closed_view_mode_{bot_name}",
+                    label_visibility="collapsed",
+                )
+            with ctrl_c2:
+                tok_choices = ["全部标的"] + sorted(list(set(p["token"] for p in parsed_trades)))
+                filter_tok = st.selectbox("按标的筛选", tok_choices, key=f"closed_tok_{bot_name}", label_visibility="collapsed")
+            with ctrl_c3:
+                filter_res = st.selectbox("按盈亏筛选", ["全部战报", "仅看盈利 (Win)", "仅看亏损 (Loss)"], key=f"closed_res_{bot_name}", label_visibility="collapsed")
+
+            # Apply filters
+            filtered_trades = parsed_trades
+            if filter_tok != "全部标的":
+                filtered_trades = [p for p in filtered_trades if p["token"] == filter_tok]
+            if filter_res == "仅看盈利 (Win)":
+                filtered_trades = [p for p in filtered_trades if p["real_net_trade"] > 0]
+            elif filter_res == "仅看亏损 (Loss)":
+                filtered_trades = [p for p in filtered_trades if p["real_net_trade"] < 0]
+
+            # Generate dataframe for Table View and expander
+            closed_rows = []
+            for p in filtered_trades:
                 closed_rows.append({
-                    "平仓时间": format_timestamp(t.get("close_timestamp", 0), active_tz),
-                    "标的": t.get("token", ""),
-                    "交易方向": f"{t.get('side_1', '')} HL / {t.get('side_2', '')} BN",
-                    "持仓时长": dur_str,
-                    "开仓币数 (HL/BN)": f"{amt_1:,.2f} / {amt_2:,.2f}",
-                    "单边货值": f"${pos_size_val:,.2f}",
-                    "双边总敞口": f"${dual_notional_val:,.2f}",
-                    "实缴保证金": f"${margin_val:,.2f} ({lev_val:.0f}x)",
-                    "开仓基差": f"{float(t.get('entry_basis_pct', 0)):+.2%}",
-                    "平仓基差": f"{float(t.get('close_basis_pct', 0)):+.2%}",
-                    "理论毛价差": f"${gross_tpnl:+,.2f}",
-                    "深度滑点损耗": f"-${depth_slip_val:,.2f}",
-                    "时延跳价损耗": f"-${latency_slip_val:,.2f}",
-                    "预估总手续费": f"-${fee:,.2f}",
-                    "摩擦总成本": f"-${friction_tot:,.2f}",
-                    "已结资金费": f"${fpnl:+,.2f}",
-                    "跨越结算窗口": f"{t.get('settlement_count', 0)} 周期",
-                    "穿透真实净利": f"${real_net_trade:+,.2f}",
-                    "纸面净利 (仅扣佣金)": f"${paper_net:+,.2f}",
-                    "真实本金 ROE": f"{roe_pct:+.2%}",
-                    "Alpha 留存率": f"{retention_pct:.1f}%",
-                    "平仓原因": t.get("close_reason", ""),
+                    "平仓时间": p["close_time_str"],
+                    "标的": p["token"],
+                    "交易方向": f"{p['side_1']} HL / {p['side_2']} BN",
+                    "持仓时长": p["dur_str"],
+                    "开仓币数 (HL/BN)": f"{p['amt_1']:,.2f} / {p['amt_2']:,.2f}",
+                    "单边货值": f"${p['pos_size_val']:,.2f}",
+                    "双边总敞口": f"${p['dual_notional_val']:,.2f}",
+                    "实缴保证金": f"${p['margin_val']:,.2f} ({p['lev_val']:.0f}x)",
+                    "开仓基差": f"{p['entry_basis']:+.2%}",
+                    "平仓基差": f"{p['close_basis']:+.2%}",
+                    "理论毛价差": f"${p['gross_tpnl']:+,.2f}",
+                    "深度滑点损耗": f"-${p['depth_slip_val']:,.2f}",
+                    "时延跳价损耗": f"-${p['latency_slip_val']:,.2f}",
+                    "预估总手续费": f"-${p['fee']:,.2f}",
+                    "摩擦总成本": f"-${p['friction_tot']:,.2f}",
+                    "已结资金费": f"${p['fpnl']:+,.2f}",
+                    "跨越结算窗口": f"{p['settle_cnt']} 周期",
+                    "穿透真实净利": f"${p['real_net_trade']:+,.2f}",
+                    "纸面净利 (仅扣佣金)": f"${p['paper_net']:+,.2f}",
+                    "真实本金 ROE": f"{p['roe_pct']:+.2%}",
+                    "Alpha 留存率": f"{p['retention_pct']:.1f}%",
+                    "平仓原因": p["close_reason"],
                 })
             df_closed = pd.DataFrame(closed_rows)
-            st.dataframe(df_closed, use_container_width=True, hide_index=True)
+
+            # View Dispatcher
+            if "Cards" in closed_view_mode:
+                if not filtered_trades:
+                    st.warning("⚠️ 筛选条件下无匹配的历史结算记录。")
+                else:
+                    if len(filtered_trades) > 15:
+                        limit_col1, limit_col2 = st.columns([3, 1])
+                        with limit_col2:
+                            page_limit = st.selectbox("每页显示记录", [10, 20, 50, "全部"], index=1, key=f"page_lim_{bot_name}")
+                        max_disp = len(filtered_trades) if page_limit == "全部" else int(page_limit)
+                    else:
+                        max_disp = len(filtered_trades)
+
+                    for p in filtered_trades[:max_disp]:
+                        card_html = _render_closed_trade_card_html(p)
+                        if hasattr(st, "html"):
+                            st.html(card_html)
+                        else:
+                            st.markdown(card_html, unsafe_allow_html=True)
+
+                    if max_disp < len(filtered_trades):
+                        st.caption(f"ℹ️ 当前显示前 {max_disp} 条记录，共 {len(filtered_trades)} 条。如需查看全部请调整每页显示数量或切换至大表视图。")
+
+                    # Collapsible raw table below the cards
+                    with st.expander(f"📋 展开全维数据原始大表 [{len(df_closed)} 条筛选记录]", expanded=False):
+                        st.dataframe(df_closed, use_container_width=True, hide_index=True)
+
+            elif "Analytics" in closed_view_mode:
+                if not filtered_trades:
+                    st.warning("⚠️ 筛选条件下无匹配的历史结算记录。")
+                else:
+                    render_closed_trades_analytics(filtered_trades)
+                    with st.expander(f"📋 展开对应全维数据表 [{len(df_closed)} 条筛选记录]", expanded=False):
+                        st.dataframe(df_closed, use_container_width=True, hide_index=True)
+
+            else:  # Data Table View
+                st.dataframe(df_closed, use_container_width=True, hide_index=True)
+                st.caption(f"📊 已展示 {len(df_closed)} 条历史结算记录，包含 22 项全维金融穿透字段。")
 
     with tab_radar:
         if not market_comp:

@@ -594,5 +594,106 @@ class TestPreFlightMarginGate(unittest.TestCase):
         self.assertEqual(config["dry_run_virtual_balance_quote"], 0.0)
 
 
+class TestClosedTradesMultiModePresentation(unittest.TestCase):
+    """Verify Institutional Closed Trade Cards & Multi-Mode Presentation (Case 41)."""
+
+    def test_closed_trade_card_html_content(self):
+        from frontend.components.basis_stat_arb_view import _render_closed_trade_card_html
+        trade_dict = {
+            "token": "ETH",
+            "side_1": "SELL",
+            "side_2": "BUY",
+            "connector_1": "hyperliquid_perpetual",
+            "connector_2": "binance_perpetual",
+            "real_net_trade": 18.42,
+            "gross_tpnl": 24.50,
+            "fee": 3.00,
+            "depth_slip_val": 1.25,
+            "latency_slip_val": 0.83,
+            "friction_tot": 5.08,
+            "fpnl": 0.0,
+            "settle_cnt": 0,
+            "roe_pct": 0.0368,
+            "retention_pct": 75.18,
+            "dur_str": "2分 15秒",
+            "close_time_str": "2026-10-23 14:20:00",
+            "entry_basis": 0.0072,
+            "close_basis": 0.0004,
+            "compression_pct": 94.4,
+            "pos_size_val": 1500.0,
+            "dual_notional_val": 3000.0,
+            "lev_val": 3.0,
+            "margin_val": 1000.0,
+            "amt_1": 0.5842,
+            "amt_2": 0.5842,
+            "p1_ent": 2567.8,
+            "p2_ent": 2549.4,
+            "p1_close": 2555.0,
+            "p2_close": 2554.0,
+            "close_reason": "Take-Profit: Basis Compression to 4 bps",
+        }
+        card_html = _render_closed_trade_card_html(trade_dict)
+        self.assertIn("🪙 ETH", card_html)
+        self.assertIn("均值归拢收敛度", card_html)
+        self.assertIn("94.4%", card_html)
+        self.assertIn("+0.72%", card_html)
+        self.assertIn("+$18.42 USD", card_html)
+        self.assertIn("+3.68% ROE", card_html)
+        self.assertIn("Alpha 留存", card_html)
+        self.assertIn("Delta-Zero", card_html)
+        self.assertIn("财务穿透与摩擦拆解瀑布流", card_html)
+
+    def test_closed_trades_tab_renders_cards_and_strip(self):
+        from streamlit.testing.v1 import AppTest
+        code = '''
+import frontend.components.basis_stat_arb_view as view
+data = {
+    "strategy": "basis_stat_arb",
+    "is_dry_run": True,
+    "active_positions": [],
+    "closed_trades": [
+        {
+            "token": "FIL",
+            "connector_1": "hyperliquid_perpetual",
+            "connector_2": "binance_perpetual",
+            "side_1": "SELL",
+            "side_2": "BUY",
+            "amount_1": 500.0,
+            "amount_2": 500.0,
+            "entry_price_1": 1.00,
+            "entry_price_2": 0.98,
+            "close_price_1": 0.97,
+            "close_price_2": 0.97,
+            "entry_basis_pct": 0.02,
+            "close_basis_pct": 0.0,
+            "position_size": 500.0,
+            "total_notional": 1000.0,
+            "leverage": 3,
+            "total_margin": 333.33,
+            "gross_trading_pnl": 10.0,
+            "depth_slippage_cost": 0.2,
+            "latency_slippage_cost": 0.3,
+            "trading_fee": 1.0,
+            "total_friction_cost": 1.5,
+            "funding_pnl": 0.0,
+            "total_net_pnl": 8.5,
+            "close_reason": "Basis Mean-Reversion TP",
+            "close_timestamp": 1729600000,
+            "duration_seconds": 60,
+        }
+    ],
+    "market_comparison": [],
+}
+view.render_basis_stat_arb_tables(data, "test-bot")
+'''
+        app = AppTest.from_string(code, default_timeout=20).run()
+        self.assertFalse(app.exception, [r.value for r in app.exception])
+        # Verify radio view controller exists
+        self.assertTrue(len(app.radio) >= 1)
+        radio_opts = app.radio[0].options
+        self.assertTrue(any("卡片流" in opt for opt in radio_opts))
+        self.assertTrue(any("数据大表" in opt for opt in radio_opts))
+
+
 if __name__ == "__main__":
     unittest.main()
