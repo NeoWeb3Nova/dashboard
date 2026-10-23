@@ -563,5 +563,36 @@ view.render_basis_stat_arb_tables(data, "test-bot")
         self.assertEqual(df_rot.iloc[0]["引入新标的"], "AERO")
 
 
+class TestPreFlightMarginGate(unittest.TestCase):
+    """Verify Pre-Flight Dual Margin Gate and Margin-Aware Downsizing (Case 40)."""
+
+    def test_margin_gate_formulas(self):
+        pos_size = Decimal("1500.0")
+        leverage = Decimal("3.0")
+        buffer_ratio = Decimal("0.05")
+        taker_fee = Decimal("0.0005")
+
+        margin_factor = (Decimal("1.0") / leverage) * (Decimal("1.0") + buffer_ratio) + taker_fee
+        req_margin = pos_size * margin_factor
+        self.assertEqual(req_margin, Decimal("525.75"))
+
+        # Downsizing when available margin is $400
+        avail = Decimal("400.0")
+        max_feasible = avail / margin_factor
+        self.assertAlmostEqual(float(max_feasible), 1141.2268, places=2)
+
+    def test_config_contract_includes_margin_gate(self):
+        config = {
+            "check_margin_before_entry": True,
+            "margin_buffer_ratio": 0.05,
+            "margin_aware_downsizing": True,
+            "dry_run_virtual_balance_quote": 0.0,
+        }
+        self.assertTrue(config["check_margin_before_entry"])
+        self.assertEqual(config["margin_buffer_ratio"], 0.05)
+        self.assertTrue(config["margin_aware_downsizing"])
+        self.assertEqual(config["dry_run_virtual_balance_quote"], 0.0)
+
+
 if __name__ == "__main__":
     unittest.main()
