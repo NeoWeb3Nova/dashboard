@@ -302,7 +302,7 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
 </span>
 </div>
 <span style="color: #64748b; font-size: 0.75rem;">
-💡 1秒本地内存撮合(0网络开销) · 捕捉 0.7%~1.2% 脉冲 · 0.15% 极速收割
+💡 1秒本地内存撮合(0网络开销) · 捕捉 0.5%~1.2% 脉冲 · 0.20% 极速收割
 </span>
 </div>"""
     if hasattr(st, "html"):
@@ -320,7 +320,7 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
 
     with tab_active:
         if not active_pos:
-            st.info("ℹ️ 当前暂无活跃的基差偏离套利持仓。策略正以 1 秒高频持续巡检主流币跨所价差，一旦盘口基差偏离 ≥ 0.70%，将自动以两所等额多空对冲介入！")
+            st.info("ℹ️ 当前暂无活跃的基差偏离套利持仓。策略正以 1 秒高频持续巡检主流币跨所价差，一旦盘口基差偏离 ≥ 0.50%，将自动以两所等额多空对冲介入！")
         else:
             market_comp_map = {m.get("token"): m for m in market_comp if m.get("token")}
             now_ts = time.time()
