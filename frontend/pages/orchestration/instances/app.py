@@ -49,6 +49,11 @@ from frontend.components.basis_stat_arb_view import (
     get_bot_basis_stat_arb_data,
     render_basis_stat_arb_tables,
 )
+from frontend.components.spot_perp_cash_carry_view import (
+    get_bot_spot_perp_cash_carry_data,
+    render_spot_perp_cash_carry_kpi_cards,
+    render_spot_perp_cash_carry_tables,
+)
 from frontend.components.timezone_utils import format_timestamp
 
 
@@ -152,16 +157,20 @@ def render_bot_card(bot_name):
                 error_logs = bot_data.get("error_logs", [])
                 general_logs = bot_data.get("general_logs", [])
 
-                # Early fetch funding rate arbitrage & basis stat arb data
+                # Early fetch funding rate arbitrage, basis stat arb, & spot-perp cash carry data
                 is_funding_arb_bot, arb_data = get_bot_funding_arbitrage_data(bot_name, performance)
                 is_basis_arb_bot, basis_data = get_bot_basis_stat_arb_data(bot_name, performance)
+                is_spot_perp_bot, spot_perp_data = get_bot_spot_perp_cash_carry_data(bot_name, performance)
 
                 if is_basis_arb_bot:
                     strategy_badge = "⚡ 基差统计双击流"
                     badge_style = "background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.4); color: #38bdf8;"
+                elif is_spot_perp_bot:
+                    strategy_badge = "🪙 现货-永续 Cash & Carry"
+                    badge_style = "background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); color: #34d399;"
                 elif is_funding_arb_bot:
                     strategy_badge = "💰 纯资金费率套利"
-                    badge_style = "background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); color: #10b981;"
+                    badge_style = "background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.4); color: #fbbf24;"
                 else:
                     strategy_badge = "🤖 通用策略"
                     badge_style = "background: rgba(168, 85, 247, 0.15); border: 1px solid rgba(168, 85, 247, 0.4); color: #c084fc;"
@@ -357,12 +366,15 @@ def render_bot_card(bot_name):
                             if total_volume_traded < min_expected_vol:
                                 total_volume_traded = min_expected_vol
 
-                    # Calculate detailed breakdown for funding arbitrage or basis stat arb bots
+                    # Calculate detailed breakdown for funding arbitrage, basis stat arb, or spot-perp bots
                     if is_funding_arb_bot and arb_data:
                         render_funding_arbitrage_kpi_cards(arb_data, total_volume_traded, total_global_pnl_quote)
                         render_funding_arbitrage_tables(arb_data, bot_name)
                     elif is_basis_arb_bot and basis_data:
                         render_basis_stat_arb_tables(basis_data, bot_name)
+                    elif is_spot_perp_bot and spot_perp_data:
+                        render_spot_perp_cash_carry_kpi_cards(spot_perp_data)
+                        render_spot_perp_cash_carry_tables(spot_perp_data, bot_name)
                     else:
                         total_global_pnl_pct = total_global_pnl_quote / total_volume_traded if total_volume_traded > 0 else 0
 
@@ -458,10 +470,13 @@ def render_bot_card(bot_name):
                     # For stopped bots, still show historical arbitrage data if present
                     is_funding_arb_bot, arb_data = get_bot_funding_arbitrage_data(bot_name, performance)
                     is_basis_arb_bot, basis_data = get_bot_basis_stat_arb_data(bot_name, performance)
+                    is_spot_perp_bot, spot_perp_data = get_bot_spot_perp_cash_carry_data(bot_name, performance)
                     if is_funding_arb_bot and (arb_data.get("closed_trades") or arb_data.get("active_positions")):
                         render_funding_arbitrage_tables(arb_data, bot_name)
                     elif is_basis_arb_bot and (basis_data.get("closed_trades") or basis_data.get("active_positions")):
                         render_basis_stat_arb_tables(basis_data, bot_name)
+                    elif is_spot_perp_bot and (spot_perp_data.get("closed_trades") or spot_perp_data.get("active_positions")):
+                        render_spot_perp_cash_carry_tables(spot_perp_data, bot_name)
 
                 # Logs sections (available for both running and stopped bots)
                 with st.expander("📋 Error Logs"):
