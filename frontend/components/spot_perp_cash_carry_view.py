@@ -126,6 +126,11 @@ def _render_active_spot_perp_card_html(p: dict) -> str:
     funding_accrued = float(p.get("settled_funding_pnl", 0.0))
     settle_cnt = len(p.get("funding_payments", []))
     dur_h = float(p.get("duration_seconds", 0)) / 3600.0
+    tier = p.get("tier", 3)
+
+    # Badges for Breakeven & Partial TP
+    be_html = '<span style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); padding: 2px 7px; border-radius: 5px; font-size: 0.73rem; font-weight: 700;">🔒 保本锁定</span>' if p.get("breakeven_active") else ""
+    ptp_html = '<span style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); padding: 2px 7px; border-radius: 5px; font-size: 0.73rem; font-weight: 700;">🎯 50%已止盈</span>' if p.get("partial_tp_done") else ""
 
     # Liquidation safety cushion
     cushion_pct = float(p.get("current_safety_cushion_pct", 0.30)) * 100.0
@@ -139,12 +144,17 @@ def _render_active_spot_perp_card_html(p: dict) -> str:
 <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
     <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 8px;">
         <span style="font-size: 1.3rem; font-weight: 800; color: #f8fafc;">🪙 {tok}</span>
+        <span style="background: rgba(148, 163, 184, 0.15); color: #cbd5e1; border: 1px solid rgba(148, 163, 184, 0.3); padding: 2px 7px; border-radius: 5px; font-size: 0.73rem; font-weight: 700;">
+            Tier {tier}
+        </span>
         <span style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); padding: 2px 8px; border-radius: 5px; font-size: 0.75rem; font-weight: 700;">
             现货-永续 Cash & Carry
         </span>
         <span style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); padding: 2px 8px; border-radius: 5px; font-size: 0.75rem; font-weight: 700; font-family: monospace;">
             🔥 实时 APR: {curr_apr:.1%}
         </span>
+        {be_html}
+        {ptp_html}
         <span style="color: #94a3b8; font-size: 0.8rem;">⏱️ 持仓: <b style="color: #f1f5f9;">{dur_h:.1f}小时</b></span>
     </div>
     <div style="text-align: right;">
@@ -214,12 +224,14 @@ def render_spot_perp_cash_carry_tables(arb_data: dict, bot_name: str):
             for c in market_candidates:
                 radar_rows.append({
                     "标的": c.get("token"),
+                    "分层": f"Tier {c.get('tier', 3)}",
                     "年化 APR": f"{c.get('annual_apr', 0.0):+.1%}",
                     "单期 1h 费率": f"{c.get('hourly_rate', 0.0):+.4%}",
                     "币安现货价": f"${c.get('spot_price', 0.0):.4f}",
                     "HL 永续价": f"${c.get('perp_price', 0.0):.4f}",
                     "初始基差偏离": f"{c.get('basis_pct', 0.0):+.2%}",
                     "摩擦回本周期": f"{c.get('payback_hours', 0.0):.1f} 小时",
+                    "安全定额": f"${c.get('safe_capacity', 1000.0):,.0f}",
                     "币安现货深度": f"${c.get('depth_spot', 0.0):,.0f}",
                     "HL 永续深度": f"${c.get('depth_perp', 0.0):,.0f}",
                     "状态": c.get("status", "Standby"),

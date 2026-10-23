@@ -76,6 +76,7 @@ class TestSpotPerpCardRendering(unittest.TestCase):
     def test_active_card_html_content(self):
         pos_dict = {
             "token": "SAGA",
+            "tier": 2,
             "amount": 2500.0,
             "position_size": 1000.0,
             "spot_entry_price": 0.40,
@@ -88,11 +89,16 @@ class TestSpotPerpCardRendering(unittest.TestCase):
             "duration_seconds": 7200,
             "current_safety_cushion_pct": 0.285,
             "total_net_pnl": 5.10,
+            "breakeven_active": True,
+            "partial_tp_done": True,
         }
         html_out = _render_active_spot_perp_card_html(pos_dict)
         self.assertIn("🪙 SAGA", html_out)
+        self.assertIn("Tier 2", html_out)
         self.assertIn("现货-永续 Cash & Carry", html_out)
         self.assertIn("48.5%", html_out)
+        self.assertIn("🔒 保本锁定", html_out)
+        self.assertIn("🎯 50%已止盈", html_out)
         self.assertIn("Binance 现货腿", html_out)
         self.assertIn("Hyperliquid 永续对冲腿", html_out)
         self.assertIn("28.5%", html_out)
@@ -130,24 +136,28 @@ data = {
     "market_candidates": [
         {
             "token": "ENA",
+            "tier": 3,
             "annual_apr": 0.35,
             "hourly_rate": 0.00004,
             "spot_price": 0.50,
             "perp_price": 0.501,
             "basis_pct": 0.002,
             "payback_hours": 6.5,
+            "safe_capacity": 500.0,
             "depth_spot": 25000.0,
             "depth_perp": 18000.0,
             "status": "In Position"
         },
         {
             "token": "W",
+            "tier": 3,
             "annual_apr": 0.42,
             "hourly_rate": 0.00005,
             "spot_price": 0.25,
             "perp_price": 0.251,
             "basis_pct": 0.004,
             "payback_hours": 5.2,
+            "safe_capacity": 500.0,
             "depth_spot": 32000.0,
             "depth_perp": 22000.0,
             "status": "Eligible"
