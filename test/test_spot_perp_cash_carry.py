@@ -62,6 +62,13 @@ class TestSpotPerpBotIsolation(unittest.TestCase):
         self.assertTrue(is_sp)
         self.assertEqual(len(data.get("active_positions", [])), 1)
 
+    def test_classify_bot_strategy_instances(self):
+        from frontend.pages.orchestration.instances.app import classify_bot_strategy
+        self.assertEqual(classify_bot_strategy("basis-stat-arb-dryrun-neo-20261020-001"), "basis")
+        self.assertEqual(classify_bot_strategy("spot-perp-cash-carry-dryrun-neo-20261023-001"), "spot_perp")
+        self.assertEqual(classify_bot_strategy("funding-arb-dynamic-paper-neo-20261021-055610"), "perp_perp")
+        self.assertEqual(classify_bot_strategy("unknown-market-making-bot"), "other")
+
 
 class TestSpotPerpCardRendering(unittest.TestCase):
     """Verify HTML card formatting and safety cushion display."""

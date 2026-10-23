@@ -57,6 +57,28 @@ from frontend.components.spot_perp_cash_carry_view import (
 from frontend.components.timezone_utils import format_timestamp
 
 
+def classify_bot_strategy(b: str) -> str:
+    """
+    Classify bot instance into its specialized strategy archetype.
+    Returns: 'basis' | 'spot_perp' | 'perp_perp' | 'other'
+    """
+    b_low = b.lower()
+    if "basis" in b_low:
+        return "basis"
+    if "spot_perp" in b_low or "spot-perp" in b_low:
+        return "spot_perp"
+    if "funding" in b_low:
+        return "perp_perp"
+    # Fallback detection from local persistent ledgers if name doesn't match
+    if os.path.exists(f"../hummingbot-api/bots/instances/{b}/data/spot_perp_cash_carry_trades.json"):
+        return "spot_perp"
+    if os.path.exists(f"../hummingbot-api/bots/instances/{b}/data/basis_stat_arb_trades.json"):
+        return "basis"
+    if os.path.exists(f"../hummingbot-api/bots/instances/{b}/data/arbitrage_trades.json"):
+        return "perp_perp"
+    return "other"
+
+
 def stop_bot(bot_name):
     """Stop a running bot."""
     try:
@@ -166,10 +188,10 @@ def render_bot_card(bot_name):
                     strategy_badge = "⚡ 基差统计双击流"
                     badge_style = "background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.4); color: #38bdf8;"
                 elif is_spot_perp_bot:
-                    strategy_badge = "🪙 现货-永续 Cash & Carry"
+                    strategy_badge = "🪙 现货-期货资金费套利"
                     badge_style = "background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); color: #34d399;"
                 elif is_funding_arb_bot:
-                    strategy_badge = "💰 纯资金费率套利"
+                    strategy_badge = "💰 期货-期货资金费套利"
                     badge_style = "background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.4); color: #fbbf24;"
                 else:
                     strategy_badge = "🤖 通用策略"
@@ -628,14 +650,16 @@ def show_bot_instances():
                     status_placeholder.warning("⏸️ Auto-refresh paused. Click 'Refresh Now' to resume.")
 
                 # Classify running bots by strategy type
-                basis_bots = [b for b in truly_active_bots.keys() if "basis" in b.lower()]
-                funding_bots = [b for b in truly_active_bots.keys() if "funding" in b.lower()]
-                other_bots = [b for b in truly_active_bots.keys() if b not in basis_bots and b not in funding_bots]
+                basis_bots = [b for b in truly_active_bots.keys() if classify_bot_strategy(b) == "basis"]
+                spot_perp_bots = [b for b in truly_active_bots.keys() if classify_bot_strategy(b) == "spot_perp"]
+                funding_bots = [b for b in truly_active_bots.keys() if classify_bot_strategy(b) == "perp_perp"]
+                other_bots = [b for b in truly_active_bots.keys() if classify_bot_strategy(b) == "other"]
 
                 filter_options = [
                     "🗂️ 平铺全部策略",
                     "⚡ 基差统计双击流",
-                    "💰 纯资金费率套利",
+                    "🪙 现货-期货资金费套利",
+                    "💰 期货-期货资金费套利",
                 ]
                 if other_bots:
                     filter_options.append("🤖 其他策略实例")
@@ -643,7 +667,9 @@ def show_bot_instances():
                 def format_filter_label(opt):
                     if "基差" in opt:
                         return f"{opt} ({len(basis_bots)})"
-                    elif "资金" in opt:
+                    elif "现货" in opt:
+                        return f"{opt} ({len(spot_perp_bots)})"
+                    elif "期货-期货" in opt:
                         return f"{opt} ({len(funding_bots)})"
                     elif "其他" in opt:
                         return f"{opt} ({len(other_bots)})"
@@ -680,9 +706,12 @@ def show_bot_instances():
                 if "基差" in current_filter:
                     visible_bots = basis_bots
                     empty_msg = "当前暂无运行中的【基差统计双击流】实例。可前往「Config Generators -> Basis Stat Arb」快速配置启动。"
-                elif "资金" in current_filter:
+                elif "现货" in current_filter:
+                    visible_bots = spot_perp_bots
+                    empty_msg = "当前暂无运行中的【现货-期货资金费套利】实例。"
+                elif "期货-期货" in current_filter:
                     visible_bots = funding_bots
-                    empty_msg = "当前暂无运行中的【纯资金费率套利】实例。"
+                    empty_msg = "当前暂无运行中的【期货-期货资金费套利】实例（旧期期套利策略已安全离线归档）。"
                 elif "其他" in current_filter:
                     visible_bots = other_bots
                     empty_msg = "当前暂无其他运行中的策略实例。"
