@@ -98,7 +98,11 @@ def _render_closed_trade_card_html(p: dict) -> str:
     p2_cls = p["p2_close"]
     reason = p["close_reason"]
 
-    if "TP" in reason or "Mean-Reversion" in reason or "take_profit" in reason or "compression" in reason.lower():
+    if "Early TP" in reason:
+        reason_badge = '<span style="background: rgba(16, 185, 129, 0.25); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.5); padding: 2px 7px; border-radius: 4px; font-size: 0.72rem; font-weight: 700;">⚡ 浮盈爆发提前收割</span>'
+    elif "Floor Protected" in reason:
+        reason_badge = '<span style="background: rgba(56, 189, 248, 0.2); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.4); padding: 2px 7px; border-radius: 4px; font-size: 0.72rem; font-weight: 700;">🔒 底线保本强制锁定</span>'
+    elif "TP" in reason or "Mean-Reversion" in reason or "take_profit" in reason or "compression" in reason.lower():
         reason_badge = '<span style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); padding: 2px 7px; border-radius: 4px; font-size: 0.72rem; font-weight: 600;">🟢 均值回归达标止盈</span>'
     elif "trailing" in reason.lower():
         reason_badge = '<span style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); padding: 2px 7px; border-radius: 4px; font-size: 0.72rem; font-weight: 600;">🟡 移动止盈回撤保利</span>'
@@ -552,6 +556,14 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
         st.html(dock_banner_html)
     else:
         st.markdown(dock_banner_html, unsafe_allow_html=True)
+
+    # Toxic Token Quarantine Status Banner
+    quarantined = arb_data.get("quarantined_tokens", {})
+    now_ts = time.time()
+    active_quarantined = {tok: max(1, int((float(ts) - now_ts) / 60)) for tok, ts in quarantined.items() if float(ts) > now_ts}
+    if active_quarantined:
+        q_items = " · ".join([f"<b>{tok}</b> (剩余 {rem}m)" for tok, rem in active_quarantined.items()])
+        st.warning(f"🚨 **动量发散冷冻隔离舱生效中**：以下标的因遭遇单边基差撕裂触发硬止损，已自动进入动量退潮冷却室，期间严格禁开新仓以防追跌磨损：{q_items}")
 
     tab_active, tab_closed, tab_radar, tab_discovery, tab_rotation = st.tabs([
         f"⚡ 活跃基差持仓  [{len(active_pos)} 仓位]",

@@ -857,6 +857,72 @@ view.render_basis_stat_arb_tables(data, "test-bot")
         self.assertIn("🕒 平仓时间 (最新在前)", sort_sb.options)
         self.assertIn("💰 真实纯利 (从高到低)", sort_sb.options)
 
+    def test_early_tp_and_floor_badges(self):
+        """Verify _render_closed_trade_card_html renders Early TP and Floor Protected badges."""
+        from frontend.components.basis_stat_arb_view import _render_closed_trade_card_html
+        base_trade = {
+            "token": "REZ",
+            "side_1": "SELL",
+            "side_2": "BUY",
+            "connector_1": "hyperliquid_perpetual",
+            "connector_2": "binance_perpetual",
+            "real_net_trade": 1.5,
+            "gross_tpnl": 2.5,
+            "fee": 0.5,
+            "depth_slip_val": 0.2,
+            "latency_slip_val": 0.3,
+            "friction_tot": 1.0,
+            "fpnl": 0.0,
+            "settle_cnt": 0,
+            "roe_pct": 0.015,
+            "retention_pct": 60.0,
+            "dur_str": "15秒",
+            "close_time_str": "10-23 23:00:00",
+            "entry_basis": 0.008,
+            "close_basis": 0.001,
+            "captured_basis_bps": 70.0,
+            "compression_pct": 87.5,
+            "pos_size_val": 300.0,
+            "dual_notional_val": 600.0,
+            "lev_val": 3,
+            "margin_val": 200.0,
+            "amt_1": 100.0,
+            "amt_2": 100.0,
+            "p1_ent": 1.0,
+            "p2_ent": 1.0,
+            "p1_close": 1.0,
+            "p2_close": 1.0,
+            "close_reason": "Profit-Locked Early TP (+0.50% >= +0.35%, held 15s)",
+        }
+        card_html = _render_closed_trade_card_html(base_trade)
+        self.assertIn("⚡ 浮盈爆发提前收割", card_html)
+
+        base_trade["close_reason"] = "Trailing Stop Floor Protected (Peak: +0.62%, Secured at +0.15%)"
+        card_html_floor = _render_closed_trade_card_html(base_trade)
+        self.assertIn("🔒 底线保本强制锁定", card_html_floor)
+
+    def test_quarantine_banner_rendered(self):
+        """Verify quarantine banner is rendered when quarantined_tokens is present."""
+        import time as _t
+        now_ts = _t.time()
+        from streamlit.testing.v1 import AppTest
+        code = f'''
+import frontend.components.basis_stat_arb_view as view
+data = {{
+    "strategy": "basis_stat_arb",
+    "is_dry_run": True,
+    "active_positions": [],
+    "closed_trades": [],
+    "market_comparison": [],
+    "quarantined_tokens": {{"SOPH": {now_ts + 1800}}},
+}}
+view.render_basis_stat_arb_tables(data, "test-bot")
+'''
+        app = AppTest.from_string(code, default_timeout=20).run()
+        self.assertFalse(app.exception, [r.value for r in app.exception])
+        warnings = [w.value for w in app.warning]
+        self.assertTrue(any("动量发散冷冻隔离舱生效中" in w and "SOPH" in w for w in warnings))
+
 
 if __name__ == "__main__":
     unittest.main()
