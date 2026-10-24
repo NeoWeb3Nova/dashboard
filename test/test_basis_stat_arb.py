@@ -923,6 +923,84 @@ view.render_basis_stat_arb_tables(data, "test-bot")
         warnings = [w.value for w in app.warning]
         self.assertTrue(any("动量发散冷冻隔离舱生效中" in w and "SOPH" in w for w in warnings))
 
+    def test_sniper_badges_and_radar(self):
+        """Verify Case 52 Sniper badges and radar display."""
+        from frontend.components.basis_stat_arb_view import _render_closed_trade_card_html
+        trade = {
+            "token": "SOPH",
+            "side_1": "SELL",
+            "side_2": "BUY",
+            "connector_1": "hyperliquid_perpetual",
+            "connector_2": "binance_perpetual",
+            "real_net_trade": 3.85,
+            "gross_tpnl": 4.50,
+            "fee": 0.30,
+            "depth_slip_val": 0.15,
+            "latency_slip_val": 0.20,
+            "friction_tot": 0.65,
+            "fpnl": 0.0,
+            "settle_cnt": 0,
+            "roe_pct": 0.0385,
+            "retention_pct": 85.5,
+            "dur_str": "45秒",
+            "close_time_str": "10-24 08:00:00",
+            "entry_basis": 0.0185,
+            "close_basis": 0.0035,
+            "captured_basis_bps": 150.0,
+            "compression_pct": 81.1,
+            "pos_size_val": 300.0,
+            "dual_notional_val": 600.0,
+            "lev_val": 3,
+            "margin_val": 200.0,
+            "amt_1": 1000.0,
+            "amt_2": 1000.0,
+            "p1_ent": 0.30,
+            "p2_ent": 0.30,
+            "p1_close": 0.30,
+            "p2_close": 0.30,
+            "is_sniper": True,
+            "sniper_peak_basis": 0.0210,
+            "close_reason": "🎯 [SNIPER-TAKE-PROFIT] Exhaustion Mean-Reversion Captured! (Peak: 2.10% ➔ Current: +0.35%)",
+        }
+        card_html = _render_closed_trade_card_html(trade)
+        self.assertIn("🎯 极值力竭刺客收割", card_html)
+        self.assertIn("🎯 极值刺客 (峰值 +2.10%)", card_html)
+
+        trade["close_reason"] = "🛑 [SNIPER-INVALIDATION-STOP] Basis expanded past peak defense 2.40% (Current: +2.45%)"
+        card_html_sl = _render_closed_trade_card_html(trade)
+        self.assertIn("🛑 刺客极值破位止损", card_html_sl)
+
+        # Test radar banner in streamlit
+        import time as _t
+        now_ts = _t.time()
+        from streamlit.testing.v1 import AppTest
+        code = f'''
+import frontend.components.basis_stat_arb_view as view
+data = {{
+    "strategy": "basis_stat_arb",
+    "is_dry_run": True,
+    "active_positions": [],
+    "closed_trades": [],
+    "market_comparison": [],
+    "sniper_prey_tracker": {{
+        "SOPH": {{
+            "token": "SOPH",
+            "source": "STOP_LOSS_REVERSAL",
+            "initial_trigger_ts": {now_ts - 60},
+            "peak_basis": 0.0210,
+            "last_basis": 0.0185,
+            "consecutive_contraction_ticks": 2,
+            "status": "CONFIRMING_REVERSAL"
+        }}
+    }},
+}}
+view.render_basis_stat_arb_tables(data, "test-bot")
+'''
+        app = AppTest.from_string(code, default_timeout=20).run()
+        self.assertFalse(app.exception, [r.value for r in app.exception])
+        infos = [inf.value for inf in app.info]
+        self.assertTrue(any("极值力竭刺客雷达生效中" in inf and "SOPH" in inf for inf in infos))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -98,7 +98,11 @@ def _render_closed_trade_card_html(p: dict) -> str:
     p2_cls = p["p2_close"]
     reason = p["close_reason"]
 
-    if "Early TP" in reason:
+    if "SNIPER-TAKE-PROFIT" in reason or "Exhaustion Mean-Reversion" in reason:
+        reason_badge = '<span style="background: rgba(245, 158, 11, 0.25); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.5); padding: 2px 7px; border-radius: 4px; font-size: 0.72rem; font-weight: 700;">🎯 极值力竭刺客收割</span>'
+    elif "SNIPER-INVALIDATION-STOP" in reason:
+        reason_badge = '<span style="background: rgba(239, 68, 68, 0.25); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.5); padding: 2px 7px; border-radius: 4px; font-size: 0.72rem; font-weight: 700;">🛑 刺客极值破位止损</span>'
+    elif "Early TP" in reason:
         reason_badge = '<span style="background: rgba(16, 185, 129, 0.25); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.5); padding: 2px 7px; border-radius: 4px; font-size: 0.72rem; font-weight: 700;">⚡ 浮盈爆发提前收割</span>'
     elif "Floor Protected" in reason:
         reason_badge = '<span style="background: rgba(56, 189, 248, 0.2); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.4); padding: 2px 7px; border-radius: 4px; font-size: 0.72rem; font-weight: 700;">🔒 底线保本强制锁定</span>'
@@ -125,6 +129,12 @@ def _render_closed_trade_card_html(p: dict) -> str:
     gross_str = f"+${gross:,.2f}" if gross >= 0 else f"-${abs(gross):,.2f}"
     fpnl_str = f"+${fpnl:,.2f}" if fpnl >= 0 else f"-${abs(fpnl):,.2f}"
 
+    sniper_tag = ""
+    if p.get("is_sniper") or "SNIPER" in reason:
+        peak_b = float(p.get("sniper_peak_basis", 0.0))
+        peak_info = f" (峰值 {peak_b:+.2%})" if peak_b > 0 else ""
+        sniper_tag = f'<span style="background: rgba(245, 158, 11, 0.25); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.5); padding: 2px 7px; border-radius: 5px; font-size: 0.75rem; font-weight: 700;">🎯 极值刺客{peak_info}</span>'
+
     return f"""<div style="background: rgba(15, 23, 42, 0.7); border: 1px solid {card_border}; border-radius: 12px; padding: 16px 18px; margin-bottom: 14px; box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.35);">
 <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
     <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 6px;">
@@ -133,6 +143,7 @@ def _render_closed_trade_card_html(p: dict) -> str:
             {side1} {c1} + {side2} {c2}
         </span>
         {reason_badge}
+        {sniper_tag}
         <span style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.35); padding: 2px 7px; border-radius: 5px; font-size: 0.75rem; font-weight: 700; font-family: monospace;">
             🎯 捕获基差: {cap_bps:+.1f} bps
         </span>
@@ -565,6 +576,23 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
         q_items = " · ".join([f"<b>{tok}</b> (剩余 {rem}m)" for tok, rem in active_quarantined.items()])
         st.warning(f"🚨 **动量发散冷冻隔离舱生效中**：以下标的因遭遇单边基差撕裂触发硬止损，已自动进入动量退潮冷却室，期间严格禁开新仓以防追跌磨损：{q_items}")
 
+    # Option 1: Right-Side Exhaustion Peak Sniper Radar Banner (Case 52)
+    sniper_prey = arb_data.get("sniper_prey_tracker", {})
+    if sniper_prey:
+        prey_cards = []
+        for s_tok, p_data in sniper_prey.items():
+            peak_b = float(p_data.get("peak_basis", 0.0))
+            last_b = float(p_data.get("last_basis", peak_b))
+            reversal_bps = (peak_b - last_b) * 10000.0
+            ticks = p_data.get("consecutive_contraction_ticks", 0)
+            status_desc = "🎯 确认右侧力竭中" if ticks > 0 else "👀 跟踪峰值扩张中"
+            badge_color = "#38bdf8" if ticks > 0 else "#fbbf24"
+            prey_cards.append(
+                f"<b>{s_tok}</b> (峰值: <span style='color: #f87171;'>{peak_b:+.2%}</span> | 当前: {last_b:+.2%} | 回撤: <span style='color: {badge_color};'><b>{reversal_bps:+.1f} bps</b></span> | 确认: <b>{ticks}/3 ticks</b> · {status_desc})"
+            )
+        prey_items = " &nbsp;|&nbsp; ".join(prey_cards)
+        st.info(f"🎯 **极值力竭刺客雷达生效中 (Sniper Prey Tracking)**：正在对大波动/极端偏离标的执行右侧力竭追踪，一旦反转缩窄确立（回撤 ≥ 20 bps 且持续 3 ticks），将以闪电刺客单（$300）右侧迎头痛击：<br/>{prey_items}", icon="🎯")
+
     tab_active, tab_closed, tab_radar, tab_discovery, tab_rotation = st.tabs([
         f"⚡ 活跃基差持仓  [{len(active_pos)} 仓位]",
         f"📜 均值回归战绩  [{len(closed_trades)} 笔已结算]",
@@ -663,6 +691,12 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
                 current_abs_gap = abs(curr_basis)
                 progress_pct = max(0.0, min(100.0, (1.0 - (current_abs_gap / initial_abs_gap)) * 100.0)) if initial_abs_gap > 0 else 100.0
 
+                sniper_badge = ""
+                if p.get("is_sniper"):
+                    peak_b = float(p.get("sniper_peak_basis", 0.0))
+                    stop_b = float(p.get("sniper_stop_basis", 0.0))
+                    sniper_badge = f'<span style="background: rgba(245, 158, 11, 0.25); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.5); padding: 2px 7px; border-radius: 4px; font-size: 0.72rem; font-weight: 700; margin-left: 6px;">🎯 闪电极值刺客单 (峰值: {peak_b:+.2%} | 防守线: {stop_b:+.2%})</span>'
+
                 pnl_color = "#10b981" if total_pos_net >= 0 else "#ef4444"
 
                 pos_card_html = f"""<div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: 10px; padding: 14px; margin-bottom: 12px;">
@@ -673,6 +707,7 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
 {side1} {c1} + {side2} {c2}
 </span>
 {lock_badge}
+{sniper_badge}
 <span style="color: #94a3b8; font-size: 0.8rem; margin-left: 6px;">⏱️ 持仓: <b>{dur_str}</b></span>
 <span style="color: #64748b; font-size: 0.75rem; margin-left: 4px;">(开仓于 {open_time_str})</span>
 </div>
