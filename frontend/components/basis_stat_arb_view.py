@@ -313,6 +313,85 @@ def render_closed_trades_analytics(parsed_trades: list):
     with chart_c2:
         st.plotly_chart(fig_bar, use_container_width=True)
 
+    # 3. Realized Losses & Macro Financial Breakdown
+    loss_trades_analytics = [t for t in parsed_trades if t["real_net_trade"] < 0]
+    win_trades_analytics = [t for t in parsed_trades if t["real_net_trade"] > 0]
+    tot_win_val = sum(t["real_net_trade"] for t in win_trades_analytics)
+    tot_loss_val = sum(abs(t["real_net_trade"]) for t in loss_trades_analytics)
+    tot_fric_val = sum(t["friction_tot"] for t in parsed_trades)
+    tot_net_val = sum(t["real_net_trade"] for t in parsed_trades)
+
+    if loss_trades_analytics:
+        reason_losses = {}
+        for t in loss_trades_analytics:
+            r = t["close_reason"].split("(")[0].strip()
+            if "Divergence" in r:
+                label = "紧急发散止损 (SL)"
+            elif "Floor Protected" in r:
+                label = "移动止盈保底 (Floor)"
+            elif "Trailing Stop" in r:
+                label = "移动止盈回撤 (Trailing)"
+            elif "Timeout" in r:
+                label = "超时保护离场 (Timeout)"
+            else:
+                label = r[:16]
+            reason_losses[label] = reason_losses.get(label, 0.0) + abs(t["real_net_trade"])
+
+        sorted_reasons = sorted(reason_losses.items(), key=lambda x: x[1], reverse=True)
+        r_names = [x[0] for x in sorted_reasons]
+        r_amounts = [x[1] for x in sorted_reasons]
+
+        fig_loss = go.Figure()
+        fig_loss.add_trace(go.Bar(
+            x=r_names,
+            y=r_amounts,
+            marker=dict(color="#f87171", line=dict(color="rgba(255,255,255,0.1)", width=1)),
+            text=[f"-${v:,.2f}" for v in r_amounts],
+            textposition="outside",
+            textfont=dict(color="#fca5a5", size=11),
+        ))
+        fig_loss.update_layout(
+            title=f"🛑 真实平仓失败原因与损耗归集 (总亏损 -${tot_loss_val:,.2f} USD / {len(loss_trades_analytics)} 笔)",
+            title_font=dict(size=14, color="#f8fafc"),
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(15, 23, 42, 0.5)",
+            height=280,
+            margin=dict(l=40, r=20, t=40, b=30),
+            xaxis=dict(gridcolor="rgba(255,255,255,0.06)", tickfont=dict(color="#cbd5e1")),
+            yaxis=dict(title="亏损金额 (USD)", gridcolor="rgba(255,255,255,0.06)", tickprefix="$", tickfont=dict(color="#94a3b8")),
+            showlegend=False,
+        )
+
+        macro_labels = ["总胜单纯利", "全摩擦损耗", "总失败亏损", "最终到手净利"]
+        macro_vals = [tot_win_val, -tot_fric_val, -tot_loss_val, tot_net_val]
+        macro_colors = ["#10b981", "#f59e0b", "#ef4444", "#38bdf8"]
+        fig_macro = go.Figure()
+        fig_macro.add_trace(go.Bar(
+            x=macro_labels,
+            y=macro_vals,
+            marker=dict(color=macro_colors, line=dict(color="rgba(255,255,255,0.1)", width=1)),
+            text=[f"${v:+,.2f}" for v in macro_vals],
+            textposition="outside",
+            textfont=dict(color="#cbd5e1", size=11),
+        ))
+        fig_macro.update_layout(
+            title="⚖️ 宏观资金损益流向 (胜单利 vs 摩擦损 vs 失败亏 vs 净到手)",
+            title_font=dict(size=14, color="#f8fafc"),
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(15, 23, 42, 0.5)",
+            height=280,
+            margin=dict(l=40, r=20, t=40, b=30),
+            xaxis=dict(gridcolor="rgba(255,255,255,0.06)", tickfont=dict(color="#cbd5e1")),
+            yaxis=dict(title="金额 (USD)", gridcolor="rgba(255,255,255,0.06)", tickprefix="$", tickfont=dict(color="#94a3b8")),
+            showlegend=False,
+        )
+
+        chart_c3, chart_c4 = st.columns(2)
+        with chart_c3:
+            st.plotly_chart(fig_loss, use_container_width=True)
+        with chart_c4:
+            st.plotly_chart(fig_macro, use_container_width=True)
+
 
 def get_bot_basis_stat_arb_data(bot_name, performance):
     """Retrieve basis stat arb custom_info from MQTT performance or local disk."""
@@ -457,14 +536,25 @@ def render_basis_stat_arb_kpi_cards(arb_data, total_volume_traded=0.0):
 
     # Real vs Paper Win rate & stats
     real_winning_trades = [t for t, f in zip(closed_trades, trade_frictions) if (float(t.get("gross_trading_pnl", float(t.get("trading_pnl", 0)) + f[3])) - f[3] + float(t.get("funding_pnl", 0))) > 0.0001]
+    real_losing_trades = [t for t, f in zip(closed_trades, trade_frictions) if (float(t.get("gross_trading_pnl", float(t.get("trading_pnl", 0)) + f[3])) - f[3] + float(t.get("funding_pnl", 0))) < -0.0001]
     real_win_rate = (len(real_winning_trades) / len(closed_trades) * 100.0) if closed_trades else 0.0
     paper_winning_trades = [t for t in closed_trades if float(t.get("paper_net_pnl", t.get("total_net_pnl", 0))) > 0]
     paper_win_rate = (len(paper_winning_trades) / len(closed_trades) * 100.0) if closed_trades else 0.0
 
+    total_realized_loss = sum(abs((float(t.get("gross_trading_pnl", float(t.get("trading_pnl", 0)) + f[3])) - f[3] + float(t.get("funding_pnl", 0)))) for t, f in zip(closed_trades, trade_frictions) if (float(t.get("gross_trading_pnl", float(t.get("trading_pnl", 0)) + f[3])) - f[3] + float(t.get("funding_pnl", 0))) < -0.0001)
+    total_realized_win = sum((float(t.get("gross_trading_pnl", float(t.get("trading_pnl", 0)) + f[3])) - f[3] + float(t.get("funding_pnl", 0))) for t, f in zip(closed_trades, trade_frictions) if (float(t.get("gross_trading_pnl", float(t.get("trading_pnl", 0)) + f[3])) - f[3] + float(t.get("funding_pnl", 0))) > 0.0001)
+    avg_loss_val = (total_realized_loss / len(real_losing_trades)) if real_losing_trades else 0.0
+    max_loss_val = max([abs(float(t.get("total_net_pnl", 0))) for t in real_losing_trades] or [0.0])
+    profit_factor_val = (total_realized_win / total_realized_loss) if total_realized_loss > 0 else (99.9 if total_realized_win > 0 else 0.0)
+
+    loss_ratio = (len(real_losing_trades) / len(closed_trades) * 100.0) if closed_trades else 0.0
+    divergence_loss = sum(abs(float(t.get("total_net_pnl", 0))) for t in real_losing_trades if "Divergence" in t.get("close_reason", ""))
+    trailing_loss = sum(abs(float(t.get("total_net_pnl", 0))) for t in real_losing_trades if "Trailing" in t.get("close_reason", ""))
+
     avg_hold_seconds = (sum(int(t.get("duration_seconds", 0)) for t in closed_trades) / len(closed_trades)) if closed_trades else 0.0
     avg_hold_str = format_precise_duration(avg_hold_seconds)
 
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
     with c1:
         st.metric(
             "💼 真实实缴总保证金",
@@ -490,13 +580,28 @@ def render_basis_stat_arb_kpi_cards(arb_data, total_volume_traded=0.0):
         )
     with c4:
         st.metric(
+            "🛑 真实平仓失败归集",
+            f"-${total_realized_loss:,.2f}",
+            f"{len(real_losing_trades)} 笔失败 | 均亏 -${avg_loss_val:,.2f} (盈亏比 {profit_factor_val:.1f}:1)",
+            delta_color="inverse",
+            help=(
+                f"真实平仓失败金额深度归集与风险透视：\n"
+                f"• 累计平仓净亏损：-${total_realized_loss:,.2f} USD（共 {len(real_losing_trades)} 笔亏损，占总结算 {len(closed_trades)} 笔的 {loss_ratio:.1f}%）\n"
+                f"• 盈亏金额比 (Profit Factor)：{profit_factor_val:.2f}（总盈利 +${total_realized_win:,.2f} vs 总亏损 -${total_realized_loss:,.2f}）\n"
+                f"• 单笔平均亏损：-${avg_loss_val:,.2f} USD\n"
+                f"• 最大单笔亏损：-${max_loss_val:,.2f} USD\n"
+                f"• 失败归因构成：发散止损 -${divergence_loss:,.2f} | 移动止盈回撤/保底 -${trailing_loss:,.2f}"
+            )
+        )
+    with c5:
+        st.metric(
             "🛡️ Alpha 净利留存率",
             f"{avg_alpha_retention:.1f}%",
             f"毛利 ${total_gross_trading:+,.1f}",
             delta_color="normal",
             help="理论纸面价差毛利在完全承受深度滑点、网络时延跳价与双边手续费后的净利润留存比例（Net PnL / Gross PnL）。"
         )
-    with c5:
+    with c6:
         st.metric(
             "📈 活跃持仓浮动净盈亏",
             f"${total_unrealized_pnl:+,.2f}",
@@ -504,7 +609,7 @@ def render_basis_stat_arb_kpi_cards(arb_data, total_volume_traded=0.0):
             delta_color="normal",
             help="当前活跃基差仓位的净浮动盈亏（已计入开平仓4腿手续费摩擦与动态盘口价差，随盘口基差压缩动态更新）"
         )
-    with c6:
+    with c7:
         st.metric(
             "🎁 已结算资金费 (Settled)",
             f"${total_funding_harvested:+,.2f}",
@@ -861,6 +966,14 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
             avg_roe = (sum(p["roe_pct"] for p in parsed_trades) / tot_trades) if tot_trades > 0 else 0.0
             overall_ret = (tot_net / tot_gross * 100.0) if tot_gross > 0 else 0.0
 
+            loss_trade_items = [p for p in parsed_trades if p["real_net_trade"] < 0]
+            win_trade_items = [p for p in parsed_trades if p["real_net_trade"] > 0]
+            tot_loss_amount = sum(abs(p["real_net_trade"]) for p in loss_trade_items)
+            tot_win_amount = sum(p["real_net_trade"] for p in win_trade_items)
+            avg_loss_amount = (tot_loss_amount / len(loss_trade_items)) if loss_trade_items else 0.0
+            max_loss_amount = max([abs(p["real_net_trade"]) for p in loss_trade_items] or [0.0])
+            profit_factor_strip = (tot_win_amount / tot_loss_amount) if tot_loss_amount > 0 else (99.9 if tot_win_amount > 0 else 0.0)
+
             net_color = "#10b981" if tot_net >= 0 else "#ef4444"
 
             # Top Performance Summary Strip
@@ -878,6 +991,15 @@ def render_basis_stat_arb_tables(arb_data, bot_name):
 <div style="font-size: 0.72rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em;">穿透结清真实纯利</div>
 <div style="font-size: 1.15rem; font-weight: 800; color: {net_color}; margin-top: 1px;">
 ${tot_net:+,.2f} USD <span style="font-size: 0.78rem; color: #94a3b8; font-weight: normal;">(单均 ${avg_trade:+,.2f})</span>
+</div>
+</div>
+<div style="border-left: 1px solid rgba(255, 255, 255, 0.1); padding-left: 18px;">
+<div style="font-size: 0.72rem; color: #f87171; text-transform: uppercase; letter-spacing: 0.05em;">真实失败金额归集</div>
+<div style="font-size: 1.15rem; font-weight: 800; color: #f87171; margin-top: 1px;">
+-${tot_loss_amount:,.2f} USD <span style="font-size: 0.78rem; color: #94a3b8; font-weight: normal;">(单均 -${avg_loss_amount:,.2f})</span>
+</div>
+<div style="font-size: 0.74rem; color: #94a3b8;">
+{loss_trades} 笔失败 · 最大 -${max_loss_amount:,.2f} · 盈亏比 {profit_factor_strip:.1f}:1
 </div>
 </div>
 <div style="border-left: 1px solid rgba(255, 255, 255, 0.1); padding-left: 18px;">
@@ -1004,6 +1126,46 @@ Alpha 留存率 {overall_ret:.1f}%
                 filtered_trades = sorted(filtered_trades, key=lambda x: x["close_time_ts"], reverse=True)
 
             st.caption(f"ℹ️ 当前显示 **{len(filtered_trades)} / {tot_trades}** 笔已结算战绩 · 排序：**{sort_opt}** · 时段：**{filter_time}**")
+
+            # Dedicated Realized Loss Audit Panel when filtering by losses
+            if "仅看亏损" in filter_res and filtered_trades:
+                loss_panel_cnt = len(filtered_trades)
+                loss_panel_sum = sum(abs(p["real_net_trade"]) for p in filtered_trades)
+                loss_panel_avg = (loss_panel_sum / loss_panel_cnt) if loss_panel_cnt > 0 else 0.0
+                loss_panel_max = max(abs(p["real_net_trade"]) for p in filtered_trades)
+
+                r_breakdown = {}
+                tk_breakdown = {}
+                for p in filtered_trades:
+                    r_clean = p["close_reason"].split("(")[0].strip()
+                    r_breakdown[r_clean] = r_breakdown.get(r_clean, 0.0) + abs(p["real_net_trade"])
+                    tk_breakdown[p["token"]] = tk_breakdown.get(p["token"], 0.0) + abs(p["real_net_trade"])
+
+                r_badges = " ".join([f'<span style="background: rgba(239, 68, 68, 0.15); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.3); padding: 2px 7px; border-radius: 4px; font-size: 0.75rem; margin-right: 6px;"><b>{k}</b>: -${v:,.2f}</span>' for k, v in sorted(r_breakdown.items(), key=lambda x: x[1], reverse=True)])
+                tk_badges = " ".join([f'<span style="background: rgba(148, 163, 184, 0.15); color: #cbd5e1; border: 1px solid rgba(148, 163, 184, 0.3); padding: 2px 7px; border-radius: 4px; font-size: 0.75rem; margin-right: 6px;"><b>{k}</b>: -${v:,.2f}</span>' for k, v in sorted(tk_breakdown.items(), key=lambda x: x[1], reverse=True)])
+
+                loss_audit_html = f"""<div style="background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 8px; padding: 12px 16px; margin: 8px 0 14px 0;">
+<div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+<div style="font-weight: 700; color: #f87171; font-size: 0.95rem;">
+🛑 真实失败订单全维归集与复盘看板 ({loss_panel_cnt} 笔筛选亏损)
+</div>
+<div style="font-size: 0.82rem; color: #cbd5e1;">
+累计亏损: <b style="color: #f87171; font-size: 1.05rem;">-${loss_panel_sum:,.2f} USD</b> · 单均: <b style="color: #fca5a5;">-${loss_panel_avg:,.2f}</b> · 最大单笔: <b style="color: #ef4444;">-${loss_panel_max:,.2f}</b>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 6px; margin-top: 8px; font-size: 0.78rem; color: #94a3b8; border-top: 1px dashed rgba(239, 68, 68, 0.2); padding-top: 8px;">
+<div style="display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
+<span style="color: #cbd5e1; font-weight: 600;">📌 失败原因构成:</span> {r_badges}
+</div>
+<div style="display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
+<span style="color: #cbd5e1; font-weight: 600;">🪙 涉及标的损失:</span> {tk_badges}
+</div>
+</div>
+</div>"""
+                if hasattr(st, "html"):
+                    st.html(loss_audit_html)
+                else:
+                    st.markdown(loss_audit_html, unsafe_allow_html=True)
 
             # Generate dataframe for Table View and expander
             closed_rows = []

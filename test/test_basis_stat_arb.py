@@ -1002,5 +1002,78 @@ view.render_basis_stat_arb_tables(data, "test-bot")
         self.assertTrue(any("极值力竭刺客雷达生效中" in inf and "SOPH" in inf for inf in infos))
 
 
+class TestRealizedLossAggregation(unittest.TestCase):
+    """Test real failure loss amount aggregation and deep audit display."""
+
+    def test_kpi_loss_aggregation_and_panel(self):
+        try:
+            from streamlit.testing.v1 import AppTest
+        except ImportError:
+            self.skipTest("streamlit.testing.v1 not available")
+
+        code = '''
+import streamlit as st
+import frontend.components.basis_stat_arb_view as view
+
+data = {
+    "strategy": "basis_stat_arb",
+    "is_dry_run": True,
+    "active_positions": [],
+    "closed_trades": [
+        {
+            "token": "WIN1",
+            "trading_pnl": 12.0,
+            "total_net_pnl": 10.0,
+            "gross_trading_pnl": 12.0,
+            "trading_fee": 1.0,
+            "depth_slippage_cost": 0.5,
+            "latency_slippage_cost": 0.5,
+            "total_friction_cost": 2.0,
+            "close_reason": "Basis Mean-Reversion TP",
+            "close_timestamp": 1792600000,
+            "duration_seconds": 60,
+        },
+        {
+            "token": "LOSS1",
+            "trading_pnl": -4.0,
+            "total_net_pnl": -5.0,
+            "gross_trading_pnl": -4.0,
+            "trading_fee": 0.5,
+            "depth_slippage_cost": 0.25,
+            "latency_slippage_cost": 0.25,
+            "total_friction_cost": 1.0,
+            "close_reason": "Emergency Basis Divergence Stop-Loss",
+            "close_timestamp": 1792600100,
+            "duration_seconds": 45,
+        },
+        {
+            "token": "LOSS2",
+            "trading_pnl": -0.5,
+            "total_net_pnl": -1.0,
+            "gross_trading_pnl": -0.5,
+            "trading_fee": 0.25,
+            "depth_slippage_cost": 0.12,
+            "latency_slippage_cost": 0.13,
+            "total_friction_cost": 0.5,
+            "close_reason": "Trailing Stop Floor Protected",
+            "close_timestamp": 1792600200,
+            "duration_seconds": 61,
+        }
+    ],
+    "market_comparison": []
+}
+view.render_basis_stat_arb_tables(data, "test-bot")
+'''
+        app = AppTest.from_string(code, default_timeout=20).run()
+        self.assertFalse(app.exception, [r.value for r in app.exception])
+        # Verify 7 metrics are rendered (now including 真实平仓失败归集)
+        self.assertGreaterEqual(len(app.metric), 7)
+        metric_labels = [m.label for m in app.metric]
+        self.assertIn("🛑 真实平仓失败归集", metric_labels)
+        loss_metric = [m for m in app.metric if m.label == "🛑 真实平仓失败归集"][0]
+        # Total loss is 5.0 + 1.0 = 6.0 USD
+        self.assertIn("6.00", loss_metric.value)
+
+
 if __name__ == "__main__":
     unittest.main()
